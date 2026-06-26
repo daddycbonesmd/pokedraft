@@ -226,7 +226,7 @@ export default function Room({ code }: { code: string }) {
           {me && activeLot && (
             <div className="mt-4 border-t border-dashed border-paper-edge pt-3">
               {iAmHigh ? (
-                <p className="text-sm text-teal-700 font-semibold">You hold the top bid 🎉</p>
+                <p className="text-sm text-teal-700 font-semibold">You have the top bid.</p>
               ) : (
                 <>
                   <p className="text-xs text-ink-soft mb-1.5">Raise by:</p>

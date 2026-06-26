@@ -16,8 +16,8 @@ const caveat = Caveat({
 });
 
 export const metadata: Metadata = {
-  title: "PokéDraft — auction your league",
-  description: "A folded-paper draft league for Pokémon. Run the auction, see every bid, keep your team.",
+  title: "PokéDraft",
+  description: "Run Pokémon draft auctions with your friends.",
 };
 
 export default function RootLayout({

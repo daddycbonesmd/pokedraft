@@ -181,8 +181,8 @@ export default function AuctionDemo() {
             </>
           ) : (
             <div className="text-center py-16">
-              <p className="hand text-4xl text-coral">that&apos;s a wrap!</p>
-              <p className="text-ink-soft mt-2">The queue is empty. Every roster is below.</p>
+              <p className="hand text-4xl text-coral">queue&apos;s empty</p>
+              <p className="text-ink-soft mt-2">Rosters are below.</p>
             </div>
           )}
         </div>

@@ -39,7 +39,7 @@ export default function FormatsList() {
       ) : formats.length === 0 ? (
         <div className="paper dogear p-10 text-center">
           <p className="hand text-3xl text-coral mb-2">no formats yet</p>
-          <p className="text-ink-soft mb-5">Build your first Pokémon pool to run a draft from.</p>
+          <p className="text-ink-soft mb-5">Make a Pokémon pool to draft from.</p>
           <Link href="/build" className="btn btn-coral">Build a format</Link>
         </div>
       ) : (

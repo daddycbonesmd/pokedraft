@@ -5,7 +5,6 @@ export default function Home() {
     <main className="flex flex-1 flex-col items-center px-6 py-16">
       {/* Hero */}
       <section className="w-full max-w-2xl text-center">
-        <p className="hand text-2xl text-coral mb-2 -rotate-2">gather your rivals…</p>
         <h1 className="font-display text-6xl sm:text-7xl font-black tracking-tight text-ink">
           Poké<span className="text-coral">Draft</span>
         </h1>
@@ -31,9 +30,9 @@ export default function Home() {
       {/* Three folded cards explaining the flow */}
       <section className="mt-20 grid gap-6 sm:grid-cols-3 w-full max-w-4xl">
         {[
-          { n: "1", t: "Build the format", d: "You pick which Pokémon are in, set tiers and point costs. Full control over the pool." },
-          { n: "2", t: "Run the auction", d: "Coaches bid in real time. You drop the hammer. Everyone sees every bid as it happens." },
-          { n: "3", t: "Keep your team", d: "Every pick is saved to your roster. Come back any time to see who you drafted." },
+          { n: "1", t: "Build the format", d: "Choose which Pokémon can be drafted and set their tiers." },
+          { n: "2", t: "Run the auction", d: "Coaches bid from their own devices. You decide when each Pokémon sells." },
+          { n: "3", t: "Keep your team", d: "Your picks are saved. Check your roster whenever you want." },
         ].map((c, i) => (
           <div
             key={c.n}
@@ -46,10 +45,6 @@ export default function Home() {
           </div>
         ))}
       </section>
-
-      <footer className="mt-20 text-sm text-ink-soft/70 hand text-lg">
-        made for game night ✦ not a robot in sight
-      </footer>
     </main>
   );
 }
