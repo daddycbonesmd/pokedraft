@@ -9,6 +9,7 @@ export type League = {
   nomination_mode: string;
   pool: Record<string, string>; // monId → tier
   tier_values: Record<string, number>; // tier → draft point value
+  team_size: number; // max Pokémon per coach
   status: string;
   ruleset: string; // e.g. "VGC 2025 Reg I · Tera" — shown in the room
   created_at: string;
@@ -86,6 +87,7 @@ export async function createLeague(opts: {
   mode: NominationMode;
   ruleset?: string;
   tierValues?: Record<string, number>;
+  teamSize?: number;
 }): Promise<{ league: League; coach: Coach }> {
   const code = makeCode();
   const admin_token = crypto.randomUUID();
@@ -99,6 +101,7 @@ export async function createLeague(opts: {
       nomination_mode: opts.mode,
       pool: opts.pool,
       tier_values: opts.tierValues ?? {},
+      team_size: opts.teamSize ?? 6,
       status: "drafting",
       ruleset: opts.ruleset ?? "",
     })

@@ -99,8 +99,13 @@ export default function Room({ code }: { code: string }) {
   const spent = (c: Coach) => wonLots.filter((l) => l.winner_coach_id === c.id).reduce((s, l) => s + (l.final_price ?? 0), 0);
   const remaining = (c: Coach) => league.budget - spent(c);
 
+  const teamSize = league.team_size;
+  const teamCount = (c: Coach) => wonLots.filter((l) => l.winner_coach_id === c.id).length;
+  const isFull = (c: Coach) => teamCount(c) >= teamSize;
+  const allFull = coaches.length > 0 && coaches.every(isFull);
+
   const iAmHigh = Boolean(me && highCoach && me.id === highCoach.id);
-  const canBid = Boolean(me && activeLot && !iAmHigh && remaining(me!) >= nextBid);
+  const canBid = Boolean(me && activeLot && !iAmHigh && !isFull(me!) && remaining(me!) >= nextBid);
 
   async function act(fn: () => Promise<void>) {
     setError("");
@@ -166,7 +171,7 @@ export default function Room({ code }: { code: string }) {
   // Snake draft (no auction): take turns picking directly, in snake order.
   const isSnake = mode === "snake_draft";
   const currentPicker = isSnake ? players[snakeIdx(finishedCount)] ?? null : null;
-  const iPick = Boolean(isSnake && me && currentPicker && me.id === currentPicker.id);
+  const iPick = Boolean(isSnake && me && currentPicker && me.id === currentPicker.id && !isFull(me));
 
   const monValue = (monId: number) => valueForTier(league.pool[monId], league.tier_values);
 
@@ -182,7 +187,7 @@ export default function Room({ code }: { code: string }) {
   }
 
   if (isSnake) {
-    const draftDone = poolMons.length === 0;
+    const draftDone = allFull || poolMons.length === 0;
     return (
       <div className="max-w-5xl mx-auto px-4 py-6">
         <div className="flex flex-wrap items-center justify-between gap-2 mb-5">
@@ -212,7 +217,7 @@ export default function Room({ code }: { code: string }) {
               <p className="hand text-3xl text-coral">{iPick ? "your pick" : `${currentPicker?.name ?? "…"}'s turn`}</p>
               <p className="text-ink-soft mt-1">
                 Pick {wonLots.length + 1} · {poolMons.length} left
-                {me && <> · <b className="text-ink">{remaining(me)}</b> pts to spend</>}
+                {me && <> · <b className="text-ink">{remaining(me)}</b> pts · {teamCount(me)}/{teamSize} drafted</>}
               </p>
             </>
           )}
@@ -249,7 +254,7 @@ export default function Room({ code }: { code: string }) {
                 style={{ borderTop: `5px solid ${c.color}`, outline: onTurn ? `2px solid ${c.color}` : undefined }}>
                 <div className="flex items-baseline justify-between">
                   <span className="font-display font-bold text-lg">{c.name}{c.is_admin && " (host)"}</span>
-                  <span className="text-sm text-ink-soft">{remaining(c)} pts · {picks.length}</span>
+                  <span className="text-sm text-ink-soft">{remaining(c)} pts · {picks.length}/{teamSize}</span>
                 </div>
                 <div className="mt-3 space-y-2 min-h-10">
                   {picks.length === 0 && <p className="text-sm text-ink-soft italic">No picks yet</p>}
@@ -347,13 +352,15 @@ export default function Room({ code }: { code: string }) {
           ) : (
             <div className="text-center py-14">
               <p className="hand text-3xl text-coral">
-                {iNominate ? "your turn to nominate ↓"
+                {allFull ? "draft complete"
+                  : iNominate ? "your turn to nominate ↓"
                   : iRevealRandom ? "reveal the random pick ↓"
                   : isRandomTurn ? "waiting for a random Pokémon…"
                   : `waiting for ${nominator?.name ?? "the admin"}…`}
               </p>
               <p className="text-ink-soft mt-1">
-                {iNominate ? "Pick from the pool below to open bidding."
+                {allFull ? "Every team is full."
+                  : iNominate ? "Pick from the pool below to open bidding."
                   : iRevealRandom ? "Spin up the next random Pokémon."
                   : "The next Pokémon will appear here."}
               </p>
@@ -404,7 +411,7 @@ export default function Room({ code }: { code: string }) {
       </div>
 
       {/* Nomination — pool picker for the current nominator */}
-      {!activeLot && iNominate && (
+      {!allFull && !activeLot && iNominate && (
         <div className="mt-6">
           <h3 className="font-display text-xl font-bold mb-3">
             {mode === "admin" ? "Nominate from your pool" : `${me?.name}, nominate a Pokémon`} ({poolMons.length} left)
@@ -424,7 +431,7 @@ export default function Room({ code }: { code: string }) {
       )}
 
       {/* Nomination — random reveal (one-nominated-one-random mode) */}
-      {!activeLot && iRevealRandom && (
+      {!allFull && !activeLot && iRevealRandom && (
         <div className="mt-6 text-center">
           <button className="btn btn-coral text-lg px-7 py-3" onClick={revealRandom} disabled={!poolMons.length}>
             Reveal random Pokémon

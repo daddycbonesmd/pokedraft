@@ -20,6 +20,7 @@ export default function HostLeague() {
   const [adminName, setAdminName] = useState("");
   const [leagueName, setLeagueName] = useState("");
   const [budget, setBudget] = useState(100);
+  const [teamSize, setTeamSize] = useState(6);
   const [mode, setMode] = useState<NominationMode>("one_random");
   const [formatId, setFormatId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -31,12 +32,13 @@ export default function HostLeague() {
     const f = loadFormats();
     setFormats(f);
     // Restore an in-progress host form (e.g. after popping over to build a format).
-    let saved: { adminName?: string; leagueName?: string; budget?: number; mode?: NominationMode; formatId?: string } | null = null;
+    let saved: { adminName?: string; leagueName?: string; budget?: number; teamSize?: number; mode?: NominationMode; formatId?: string } | null = null;
     try { saved = JSON.parse(sessionStorage.getItem("pokedraft.hostDraft") || "null"); } catch {}
     if (saved) {
       setAdminName(saved.adminName ?? "");
       setLeagueName(saved.leagueName ?? "");
       if (typeof saved.budget === "number") setBudget(saved.budget);
+      if (typeof saved.teamSize === "number") setTeamSize(saved.teamSize);
       if (saved.mode) setMode(saved.mode);
     }
     const savedId = saved?.formatId;
@@ -47,8 +49,8 @@ export default function HostLeague() {
   // Persist the form on every change so leaving and coming back doesn't lose it.
   useEffect(() => {
     if (!hydrated.current) { hydrated.current = true; return; }
-    sessionStorage.setItem("pokedraft.hostDraft", JSON.stringify({ adminName, leagueName, budget, mode, formatId }));
-  }, [adminName, leagueName, budget, mode, formatId]);
+    sessionStorage.setItem("pokedraft.hostDraft", JSON.stringify({ adminName, leagueName, budget, teamSize, mode, formatId }));
+  }, [adminName, leagueName, budget, teamSize, mode, formatId]);
 
   async function start() {
     setError("");
@@ -65,6 +67,7 @@ export default function HostLeague() {
         mode,
         ruleset: fmt.ruleset ? `${fmt.ruleset.name} · ${fmt.ruleset.gimmick}` : "",
         tierValues: fmt.tierValues,
+        teamSize,
       });
       sessionStorage.removeItem("pokedraft.hostDraft");
       router.push(`/room/${league.code}`);
@@ -92,6 +95,9 @@ export default function HostLeague() {
         </Field>
         <Field label="Starting budget (points per coach)">
           <input type="number" className="input" value={budget} min={10} onChange={(e) => setBudget(Number(e.target.value))} />
+        </Field>
+        <Field label="Pokémon per team">
+          <input type="number" className="input" value={teamSize} min={1} max={24} onChange={(e) => setTeamSize(Number(e.target.value))} />
         </Field>
         <Field label="Draft format">
           <div className="space-y-2">
