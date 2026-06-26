@@ -319,7 +319,10 @@ export default function Room({ code }: { code: string }) {
             {isAdmin && " (admin)"}
           </p>
         </div>
-        <Link href="/" className="btn btn-ghost text-sm py-2">Leave</Link>
+        <div className="flex gap-2">
+          <Link href={`/tournament/${league.code}`} className="btn btn-ghost text-sm py-2">Tournament</Link>
+          <Link href="/" className="btn btn-ghost text-sm py-2">Leave</Link>
+        </div>
       </div>
 
       {error && <div className="paper p-3 mb-4 text-coral text-sm">{error}</div>}

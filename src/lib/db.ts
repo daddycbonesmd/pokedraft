@@ -1,4 +1,5 @@
 import { supabase, COACH_COLORS } from "./supabase";
+import { type Tournament } from "./tournament";
 
 export type League = {
   id: string;
@@ -10,6 +11,7 @@ export type League = {
   pool: Record<string, string>; // monId → tier
   tier_values: Record<string, number>; // tier → draft point value
   team_size: number; // max Pokémon per coach
+  tournament: Tournament | null;
   status: string;
   ruleset: string; // e.g. "VGC 2025 Reg I · Tera" — shown in the room
   created_at: string;
@@ -220,6 +222,21 @@ export async function sellLot(lot: Lot): Promise<void> {
 export async function passLot(lotId: string): Promise<void> {
   const { error } = await supabase.from("lots").update({ status: "passed" }).eq("id", lotId);
   if (error) throw error;
+}
+
+// ── Tournament ─────────────────────────────────────────────────────
+export async function saveTournament(leagueId: string, tournament: Tournament | null): Promise<void> {
+  const { error } = await supabase.from("leagues").update({ tournament }).eq("id", leagueId);
+  if (error) throw error;
+}
+
+export function subscribeLeague(leagueId: string, onChange: () => void) {
+  const channel = supabase
+    .channel(`league:${leagueId}`)
+    .on("postgres_changes", { event: "*", schema: "public", table: "leagues", filter: `id=eq.${leagueId}` }, onChange)
+    .on("postgres_changes", { event: "*", schema: "public", table: "coaches", filter: `league_id=eq.${leagueId}` }, onChange)
+    .subscribe();
+  return () => { supabase.removeChannel(channel); };
 }
 
 // ── Realtime: report each change so the room can apply it directly ──
