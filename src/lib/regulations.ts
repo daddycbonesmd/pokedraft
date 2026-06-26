@@ -15,6 +15,7 @@ export type RegData = {
   svLegalNums: number[];
   restrictedNums: number[];
   mythicalNums: number[];
+  notFullyEvolvedNums: number[];
   presets: Regulation[];
 };
 
@@ -29,10 +30,12 @@ export function poolFromRegulation(dex: PokeMon[], reg: Regulation, data: RegDat
   const sv = new Set(data.svLegalNums);
   const restricted = new Set(data.restrictedNums);
   const mythical = new Set(data.mythicalNums);
+  const nfe = new Set(data.notFullyEvolvedNums ?? []);
   const out: Record<number, string> = {};
 
   for (const m of dex) {
     if (!sv.has(m.baseId)) continue;            // must be obtainable in Scarlet/Violet
+    if (nfe.has(m.baseId)) continue;             // draft pools only want fully-evolved Pokémon
     if (mythical.has(m.baseId)) continue;        // mythicals are banned in VGC
     if (reg.banLegends && restricted.has(m.baseId)) continue; // Reg H / M-A / M-B
     if (reg.gimmick === "Mega") {

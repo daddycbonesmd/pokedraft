@@ -16,6 +16,7 @@ const dex = await j(DEX);
 const svLegal = new Set();
 const restricted = new Set();
 const mythical = new Set();
+const notFullyEvolved = new Set(); // has evolutions remaining ⇒ skip for draft pools
 for (const key in dex) {
   const e = dex[key];
   if (typeof e.num !== "number" || e.num <= 0) continue;
@@ -23,6 +24,7 @@ for (const key in dex) {
   const tags = e.tags || [];
   if (tags.includes("Restricted Legendary")) restricted.add(e.num);
   if (tags.includes("Mythical")) mythical.add(e.num);
+  if (Array.isArray(e.evos) && e.evos.length > 0) notFullyEvolved.add(e.num);
 }
 
 // Pull gimmick (via mod) + restricted limit straight from Showdown's format defs.
@@ -69,6 +71,7 @@ const out = {
   svLegalNums: [...svLegal].sort((a, b) => a - b),
   restrictedNums: [...restricted].sort((a, b) => a - b),
   mythicalNums: [...mythical].sort((a, b) => a - b),
+  notFullyEvolvedNums: [...notFullyEvolved].sort((a, b) => a - b),
   presets,
 };
 await writeFile(new URL("../public/regulations.json", import.meta.url), JSON.stringify(out));
