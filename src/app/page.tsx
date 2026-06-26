@@ -10,8 +10,7 @@ export default function Home() {
           Poké<span className="text-coral">Draft</span>
         </h1>
         <p className="mt-5 text-lg text-ink-soft leading-relaxed max-w-md mx-auto">
-          A folded-paper draft league for your friends. Run the live auction,
-          watch every bid land, and keep your team forever.
+          Draft Pokémon with your friends and run the auction live.
         </p>
 
         <div className="mt-9 flex flex-col sm:flex-row gap-4 justify-center">
