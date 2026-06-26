@@ -9,6 +9,7 @@ export type League = {
   nomination_mode: string;
   pool: Record<string, string>; // monId → tier
   status: string;
+  ruleset: string; // e.g. "VGC 2025 Reg I · Tera" — shown in the room
   created_at: string;
 };
 
@@ -81,6 +82,7 @@ export async function createLeague(opts: {
   pool: Record<string, string>;
   budget: number;
   mode: NominationMode;
+  ruleset?: string;
 }): Promise<{ league: League; coach: Coach }> {
   const code = makeCode();
   const admin_token = crypto.randomUUID();
@@ -94,6 +96,7 @@ export async function createLeague(opts: {
       nomination_mode: opts.mode,
       pool: opts.pool,
       status: "drafting",
+      ruleset: opts.ruleset ?? "",
     })
     .select()
     .single();

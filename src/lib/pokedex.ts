@@ -59,6 +59,7 @@ export type Format = {
   includedIds: number[];
   tiers: Record<number, string>; // monId → tier label
   updatedAt: number;
+  ruleset?: { name: string; gimmick: string }; // set when started from a regulation preset
 };
 
 const KEY = "pokedraft.formats";

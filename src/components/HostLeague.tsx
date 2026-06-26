@@ -43,6 +43,7 @@ export default function HostLeague() {
         pool: fmt.tiers,
         budget,
         mode,
+        ruleset: fmt.ruleset ? `${fmt.ruleset.name} · ${fmt.ruleset.gimmick}` : "",
       });
       router.push(`/room/${league.code}`);
     } catch (e) {
@@ -96,7 +97,9 @@ export default function HostLeague() {
           ) : (
             <select className="input" value={formatId} onChange={(e) => setFormatId(e.target.value)}>
               {formats.map((f) => (
-                <option key={f.id} value={f.id}>{f.name} ({f.includedIds.length} Pokémon)</option>
+                <option key={f.id} value={f.id}>
+                  {f.name} ({f.includedIds.length} Pokémon){f.ruleset ? ` — ${f.ruleset.gimmick}` : ""}
+                </option>
               ))}
             </select>
           )}

@@ -12,8 +12,11 @@ create table if not exists leagues (
   nomination_mode text not null default 'admin',
   pool jsonb not null default '{}'::jsonb,  -- { "<monId>": "<tier>" }
   status text not null default 'lobby',     -- lobby | drafting | done
+  ruleset text not null default '',         -- e.g. "VGC 2025 Reg I · Tera"
   created_at timestamptz not null default now()
 );
+-- If the table already existed before this column was added:
+alter table leagues add column if not exists ruleset text not null default '';
 
 create table if not exists coaches (
   id uuid primary key default gen_random_uuid(),

@@ -129,6 +129,9 @@ export default function Room({ code }: { code: string }) {
         <div>
           <h1 className="font-display text-3xl font-black">
             {league.name} <span className="hand text-coral text-2xl font-normal">live</span>
+            {league.ruleset && (
+              <span className="chip ml-2 align-middle" style={{ background: "var(--mustard)" }}>{league.ruleset}</span>
+            )}
           </h1>
           <p className="text-sm text-ink-soft">
             Code <span className="font-mono font-bold tracking-widest">{league.code}</span> ·{" "}

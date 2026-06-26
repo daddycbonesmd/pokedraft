@@ -16,13 +16,16 @@ import {
   TYPE_COLORS,
   type PokeMon,
 } from "@/lib/pokedex";
+import { loadRegulations, poolFromRegulation, type RegData, type Regulation } from "@/lib/regulations";
 
 const MAX_VISIBLE = 300; // keep the DOM light; filters narrow things down
 
 export default function FormatBuilder({ editId }: { editId?: string }) {
   const router = useRouter();
   const [dex, setDex] = useState<PokeMon[] | null>(null);
+  const [regs, setRegs] = useState<RegData | null>(null);
   const [name, setName] = useState("My Format");
+  const [ruleset, setRuleset] = useState<{ name: string; gimmick: string } | undefined>(undefined);
   // monId → tier label. Presence in the map means "included".
   const [picked, setPicked] = useState<Record<number, string>>({});
 
@@ -36,14 +39,23 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
   // Load dex + (optionally) an existing format to edit.
   useEffect(() => {
     loadPokedex().then(setDex).catch(() => setDex([]));
+    loadRegulations().then(setRegs).catch(() => setRegs(null));
     if (editId) {
       const f = getFormat(editId);
       if (f) {
         setName(f.name);
         setPicked(f.tiers);
+        setRuleset(f.ruleset);
       }
     }
   }, [editId]);
+
+  function applyRegulation(reg: Regulation) {
+    if (!dex || !regs) return;
+    setPicked(poolFromRegulation(dex, reg, regs));
+    setName(reg.name);
+    setRuleset({ name: reg.name, gimmick: reg.gimmick });
+  }
 
   const filtered = useMemo(() => {
     if (!dex) return [];
@@ -92,6 +104,7 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
       includedIds: Object.keys(picked).map(Number),
       tiers: picked,
       updatedAt: Date.now(),
+      ruleset,
     });
     router.push("/formats");
   }
@@ -120,6 +133,31 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
           </button>
         </div>
       </div>
+
+      {/* Start from a regulation */}
+      {regs && (
+        <div className="paper p-4 mb-4">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold text-ink-soft mr-1">⚡ Start from a regulation:</span>
+            {regs.presets.map((reg) => (
+              <button
+                key={reg.id}
+                onClick={() => applyRegulation(reg)}
+                className="btn btn-ghost text-sm py-1.5"
+                title={reg.blurb}
+              >
+                {reg.name} · {reg.gimmick}
+              </button>
+            ))}
+          </div>
+          {ruleset && (
+            <p className="text-xs text-ink-soft mt-2">
+              Loaded <b className="text-ink">{ruleset.name}</b> ({ruleset.gimmick}). Tweak the pool below —
+              restricted legendaries are included where the format allows them; enforce the team limit at draft time.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Toolbar */}
       <div className="paper p-4 mb-5 space-y-3">
