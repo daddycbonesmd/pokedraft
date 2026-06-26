@@ -206,15 +206,31 @@ export async function passLot(lotId: string): Promise<void> {
   if (error) throw error;
 }
 
-// ── Realtime: fire `onChange` whenever anything in this room moves ──
-export function subscribeRoom(leagueId: string, onChange: () => void) {
+// ── Realtime: report each change so the room can apply it directly ──
+export type RoomEvent = {
+  table: "bids" | "lots" | "coaches";
+  eventType: string; // INSERT | UPDATE | DELETE
+  row: Record<string, unknown>;
+};
+
+export function subscribeRoom(leagueId: string, onEvent: (e: RoomEvent) => void) {
+  const filter = `league_id=eq.${leagueId}`;
   const channel = supabase
-    .channel(`room:${leagueId}`)
-    .on("postgres_changes", { event: "*", schema: "public", table: "bids", filter: `league_id=eq.${leagueId}` }, onChange)
-    .on("postgres_changes", { event: "*", schema: "public", table: "lots", filter: `league_id=eq.${leagueId}` }, onChange)
-    .on("postgres_changes", { event: "*", schema: "public", table: "coaches", filter: `league_id=eq.${leagueId}` }, onChange)
+    .channel(`room:${leagueId}`, { config: { broadcast: { self: false } } })
+    .on("postgres_changes", { event: "*", schema: "public", table: "bids", filter }, (p) =>
+      onEvent({ table: "bids", eventType: p.eventType, row: p.new }))
+    .on("postgres_changes", { event: "*", schema: "public", table: "lots", filter }, (p) =>
+      onEvent({ table: "lots", eventType: p.eventType, row: p.new }))
+    .on("postgres_changes", { event: "*", schema: "public", table: "coaches", filter }, (p) =>
+      onEvent({ table: "coaches", eventType: p.eventType, row: p.new }))
+    // Fast lane: bids are echoed peer-to-peer (~150ms) ahead of the slower DB-change stream.
+    .on("broadcast", { event: "bid" }, ({ payload }) =>
+      onEvent({ table: "bids", eventType: "INSERT", row: payload as Record<string, unknown> }))
     .subscribe();
-  return () => {
-    supabase.removeChannel(channel);
+  return {
+    unsubscribe: () => { supabase.removeChannel(channel); },
+    broadcastBid: (row: Record<string, unknown>) => {
+      channel.send({ type: "broadcast", event: "bid", payload: row });
+    },
   };
 }

@@ -8,7 +8,7 @@ import {
   getFormat,
   saveFormat,
   suggestTier,
-  spriteUrl,
+  spriteSmall,
   GENS,
   ALL_TYPES,
   TIERS,
@@ -227,12 +227,12 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
                   <div className="flex items-center gap-2">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={spriteUrl(m.id)}
+                      src={spriteSmall(m.id)}
                       alt={m.display}
                       width={56}
                       height={56}
                       loading="lazy"
-                      onError={(e) => { (e.target as HTMLImageElement).src = spriteUrl(m.baseId); }}
+                      onError={(e) => { (e.target as HTMLImageElement).src = spriteSmall(m.baseId); }}
                     />
                     <div className="min-w-0">
                       <div className="flex items-center gap-1 flex-wrap">

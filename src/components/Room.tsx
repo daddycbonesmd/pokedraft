@@ -6,6 +6,7 @@ import Link from "next/link";
 import {
   loadPokedex,
   spriteUrl,
+  spriteSmall,
   TYPE_COLORS,
   TIER_COLORS,
   type PokeMon,
@@ -21,12 +22,21 @@ import {
   passLot,
   type RoomState,
   type Coach,
+  type Bid,
 } from "@/lib/db";
 import { supabaseReady } from "@/lib/supabase";
 import { EnvNotice } from "./HostLeague";
 
 const OPENING = 1;
 const INCREMENTS = [1, 2, 3, 5, 10, 20];
+
+// Apply a single bid to the room state without refetching (amounts are unique per lot).
+function applyBidToState(s: RoomState, row: Bid): RoomState {
+  if (!s.activeLot || row.lot_id !== s.activeLot.id) return s;
+  if (s.bids.some((b) => b.id === row.id)) return s; // already have this exact row
+  const others = s.bids.filter((b) => b.amount !== row.amount); // replaces any optimistic stand-in
+  return { ...s, bids: [row, ...others].sort((a, b) => b.amount - a.amount) };
+}
 
 export default function Room({ code }: { code: string }) {
   const router = useRouter();
@@ -36,6 +46,7 @@ export default function Room({ code }: { code: string }) {
   const [error, setError] = useState("");
   const [fatal, setFatal] = useState("");
   const leagueIdRef = useRef<string | null>(null);
+  const broadcastRef = useRef<((row: Record<string, unknown>) => void) | null>(null);
 
   const identity = useMemo(() => getIdentity(code), [code]);
 
@@ -54,7 +65,17 @@ export default function Room({ code }: { code: string }) {
       const dex = await loadPokedex();
       setMonMap(new Map(dex.map((m) => [m.id, m])));
       await refresh();
-      cleanup = subscribeRoom(league.id, refresh);
+      const sub = subscribeRoom(league.id, (evt) => {
+        // Bids are the high-frequency path — apply them instantly from the payload.
+        if (evt.table === "bids" && evt.eventType === "INSERT") {
+          setState((s) => (s ? applyBidToState(s, evt.row as unknown as Bid) : s));
+        } else {
+          // Nominations / sales / joins are infrequent — a full resync keeps it simple.
+          refresh();
+        }
+      });
+      broadcastRef.current = sub.broadcastBid;
+      cleanup = sub.unsubscribe;
     })();
     return () => cleanup();
   }, [code, identity, router, refresh]);
@@ -82,6 +103,22 @@ export default function Room({ code }: { code: string }) {
     setError("");
     try { await fn(); await refresh(); }
     catch (e) { setError(e instanceof Error ? e.message : "Something went wrong."); }
+  }
+
+  // Bidding: show it on my own screen immediately, then persist. The realtime echo
+  // replaces the optimistic row; if the write fails, resync to the truth.
+  function submitBid() {
+    if (!me || !activeLot || !canBid) return;
+    const amount = nextBid;
+    const optimistic: Bid = {
+      id: `temp-${amount}`, league_id: league.id, lot_id: activeLot.id,
+      coach_id: me.id, amount, created_at: new Date().toISOString(),
+    };
+    setState((s) => (s ? applyBidToState(s, optimistic) : s));
+    broadcastRef.current?.(optimistic); // let everyone else see it immediately
+    setError("");
+    placeBid({ leagueId: league.id, lotId: activeLot.id, coachId: me.id, amount })
+      .catch((e) => { setError(e instanceof Error ? e.message : "Bid failed."); refresh(); });
   }
 
   const soldIds = new Set(wonLots.map((l) => l.mon_id));
@@ -237,8 +274,7 @@ export default function Room({ code }: { code: string }) {
                         disabled={!highBid && step !== 1}>+{step}</button>
                     ))}
                   </div>
-                  <button className="btn btn-teal w-full" disabled={!canBid}
-                    onClick={() => act(() => placeBid({ leagueId: league.id, lotId: activeLot.id, coachId: me.id, amount: nextBid }))}>
+                  <button className="btn btn-teal w-full" disabled={!canBid} onClick={submitBid}>
                     {remaining(me) < nextBid ? "Not enough points" : `Bid ${nextBid}`}
                   </button>
                   <p className="text-xs text-ink-soft mt-1 text-center">{remaining(me)} points left</p>
@@ -260,8 +296,8 @@ export default function Room({ code }: { code: string }) {
               <button key={m.id} onClick={() => act(() => nominate(league.id, m.id))}
                 className="paper p-2 text-center hover:-translate-y-0.5 transition" title={m.display}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={spriteUrl(m.id)} alt={m.display} width={56} height={56} loading="lazy" className="mx-auto"
-                  onError={(e) => { (e.target as HTMLImageElement).src = spriteUrl(m.baseId); }} />
+                <img src={spriteSmall(m.id)} alt={m.display} width={56} height={56} loading="lazy" className="mx-auto"
+                  onError={(e) => { (e.target as HTMLImageElement).src = spriteSmall(m.baseId); }} />
                 <span className="block text-xs truncate">{m.display}</span>
               </button>
             ))}
@@ -297,8 +333,8 @@ export default function Room({ code }: { code: string }) {
                   return (
                     <div key={l.id} className="flex items-center gap-2">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={spriteUrl(l.mon_id)} alt="" width={32} height={32}
-                        onError={(e) => { if (m) (e.target as HTMLImageElement).src = spriteUrl(m.baseId); }} />
+                      <img src={spriteSmall(l.mon_id)} alt="" width={32} height={32} loading="lazy"
+                        onError={(e) => { if (m) (e.target as HTMLImageElement).src = spriteSmall(m.baseId); }} />
                       <span className="text-sm flex-1 truncate">{m?.display ?? l.mon_id}</span>
                       <span className="text-xs text-ink-soft font-mono">{l.final_price}</span>
                     </div>

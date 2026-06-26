@@ -18,6 +18,11 @@ export type PokeMon = {
 export const spriteUrl = (id: number) =>
   `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${id}.png`;
 
+// Tiny pixel sprite (a few KB) — use in grids, lists, and thumbnails where the
+// big official artwork would be wasteful. Far faster to load in bulk.
+export const spriteSmall = (id: number) =>
+  `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${id}.png`;
+
 export const GENS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
 export const TYPE_COLORS: Record<string, string> = {
