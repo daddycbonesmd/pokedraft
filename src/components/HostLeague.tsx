@@ -64,6 +64,7 @@ export default function HostLeague() {
         budget,
         mode,
         ruleset: fmt.ruleset ? `${fmt.ruleset.name} · ${fmt.ruleset.gimmick}` : "",
+        tierValues: fmt.tierValues,
       });
       sessionStorage.removeItem("pokedraft.hostDraft");
       router.push(`/room/${league.code}`);
@@ -89,11 +90,9 @@ export default function HostLeague() {
         <Field label="League name">
           <input className="input" value={leagueName} onChange={(e) => setLeagueName(e.target.value)} placeholder="Friday Night Draft" />
         </Field>
-        {mode !== "snake_draft" && (
-          <Field label="Starting budget (points per coach)">
-            <input type="number" className="input" value={budget} min={10} onChange={(e) => setBudget(Number(e.target.value))} />
-          </Field>
-        )}
+        <Field label="Starting budget (points per coach)">
+          <input type="number" className="input" value={budget} min={10} onChange={(e) => setBudget(Number(e.target.value))} />
+        </Field>
         <Field label="Draft format">
           <div className="space-y-2">
             {MODES.map((m) => (

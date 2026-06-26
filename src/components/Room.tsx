@@ -9,6 +9,7 @@ import {
   spriteSmall,
   TYPE_COLORS,
   TIER_COLORS,
+  valueForTier,
   type PokeMon,
 } from "@/lib/pokedex";
 import {
@@ -167,11 +168,15 @@ export default function Room({ code }: { code: string }) {
   const currentPicker = isSnake ? players[snakeIdx(finishedCount)] ?? null : null;
   const iPick = Boolean(isSnake && me && currentPicker && me.id === currentPicker.id);
 
+  const monValue = (monId: number) => valueForTier(league.pool[monId], league.tier_values);
+
   async function pickMon(monId: number) {
     if (!me || busy) return;
+    const price = monValue(monId);
+    if (remaining(me) < price) { setError("Not enough points for that pick."); return; }
     setBusy(true);
     setError("");
-    try { await pickDirect(league.id, me.id, monId); await refresh(); }
+    try { await pickDirect(league.id, me.id, monId, price); await refresh(); }
     catch (e) { setError(e instanceof Error ? e.message : "Pick failed."); }
     finally { setBusy(false); }
   }
@@ -205,20 +210,28 @@ export default function Room({ code }: { code: string }) {
           ) : (
             <>
               <p className="hand text-3xl text-coral">{iPick ? "your pick" : `${currentPicker?.name ?? "…"}'s turn`}</p>
-              <p className="text-ink-soft mt-1">Pick {wonLots.length + 1} · {poolMons.length} Pokémon left</p>
+              <p className="text-ink-soft mt-1">
+                Pick {wonLots.length + 1} · {poolMons.length} left
+                {me && <> · <b className="text-ink">{remaining(me)}</b> pts to spend</>}
+              </p>
             </>
           )}
           {iPick && !draftDone && (
             <div className="grid gap-2 grid-cols-3 sm:grid-cols-5 lg:grid-cols-7 mt-4">
-              {poolMons.map((m) => (
-                <button key={m.id} disabled={busy} onClick={() => pickMon(m.id)}
-                  className="paper p-2 text-center hover:-translate-y-0.5 transition disabled:opacity-50" title={m.display}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={spriteSmall(m.id)} alt={m.display} width={56} height={56} loading="lazy" className="mx-auto"
-                    onError={(e) => { (e.target as HTMLImageElement).src = spriteSmall(m.baseId); }} />
-                  <span className="block text-xs truncate">{m.display}</span>
-                </button>
-              ))}
+              {poolMons.map((m) => {
+                const v = monValue(m.id);
+                const afford = !me || remaining(me) >= v;
+                return (
+                  <button key={m.id} disabled={busy || !afford} onClick={() => pickMon(m.id)}
+                    className="paper p-2 text-center hover:-translate-y-0.5 transition disabled:opacity-40" title={`${m.display} · ${v} pts`}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={spriteSmall(m.id)} alt={m.display} width={56} height={56} loading="lazy" className="mx-auto"
+                      onError={(e) => { (e.target as HTMLImageElement).src = spriteSmall(m.baseId); }} />
+                    <span className="block text-xs truncate">{m.display}</span>
+                    <span className="block text-[11px] font-bold" style={{ color: TIER_COLORS[league.pool[m.id]] ?? "var(--ink-soft)" }}>{v} pts</span>
+                  </button>
+                );
+              })}
             </div>
           )}
           {!iPick && !draftDone && (
@@ -236,7 +249,7 @@ export default function Room({ code }: { code: string }) {
                 style={{ borderTop: `5px solid ${c.color}`, outline: onTurn ? `2px solid ${c.color}` : undefined }}>
                 <div className="flex items-baseline justify-between">
                   <span className="font-display font-bold text-lg">{c.name}{c.is_admin && " (host)"}</span>
-                  <span className="text-sm text-ink-soft">{picks.length} picks</span>
+                  <span className="text-sm text-ink-soft">{remaining(c)} pts · {picks.length}</span>
                 </div>
                 <div className="mt-3 space-y-2 min-h-10">
                   {picks.length === 0 && <p className="text-sm text-ink-soft italic">No picks yet</p>}
@@ -248,6 +261,7 @@ export default function Room({ code }: { code: string }) {
                         <img src={spriteSmall(l.mon_id)} alt="" width={32} height={32} loading="lazy"
                           onError={(e) => { if (m) (e.target as HTMLImageElement).src = spriteSmall(m.baseId); }} />
                         <span className="text-sm flex-1 truncate">{m?.display ?? l.mon_id}</span>
+                        <span className="text-xs text-ink-soft font-mono">{l.final_price}</span>
                       </div>
                     );
                   })}
@@ -299,6 +313,9 @@ export default function Room({ code }: { code: string }) {
                     {currentMon.isMega && <span className="chip" style={{ background: "var(--indigo)" }}>Mega</span>}
                     <span className="chip" style={{ background: TIER_COLORS[league.pool[currentMon.id]] ?? "var(--ink)" }}>
                       Tier {league.pool[currentMon.id] ?? "?"}
+                    </span>
+                    <span className="chip" style={{ background: "var(--ink-soft)" }}>
+                      {valueForTier(league.pool[currentMon.id], league.tier_values)} pts
                     </span>
                   </div>
                   <div className="flex gap-1.5 mt-2">

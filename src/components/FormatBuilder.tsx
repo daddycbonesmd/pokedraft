@@ -14,6 +14,8 @@ import {
   TIERS,
   TIER_COLORS,
   TYPE_COLORS,
+  DEFAULT_TIER_VALUES,
+  valueForTier,
   type PokeMon,
 } from "@/lib/pokedex";
 import { loadRegulations, poolFromRegulation, type RegData, type Regulation } from "@/lib/regulations";
@@ -26,6 +28,7 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
   const [regs, setRegs] = useState<RegData | null>(null);
   const [name, setName] = useState("My Format");
   const [ruleset, setRuleset] = useState<{ name: string; gimmick: string } | undefined>(undefined);
+  const [tierValues, setTierValues] = useState<Record<string, number>>({ ...DEFAULT_TIER_VALUES });
   // monId → tier label. Presence in the map means "included".
   const [picked, setPicked] = useState<Record<number, string>>({});
 
@@ -46,6 +49,7 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
         setName(f.name);
         setPicked(f.tiers);
         setRuleset(f.ruleset);
+        setTierValues({ ...DEFAULT_TIER_VALUES, ...(f.tierValues ?? {}) });
       }
     }
   }, [editId]);
@@ -103,6 +107,7 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
       name: name.trim() || "Untitled Format",
       includedIds: Object.keys(picked).map(Number),
       tiers: picked,
+      tierValues,
       updatedAt: Date.now(),
       ruleset,
     });
@@ -158,6 +163,26 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
           )}
         </div>
       )}
+
+      {/* Draft values per tier */}
+      <div className="paper p-4 mb-4">
+        <p className="text-sm font-semibold text-ink-soft mb-2">Draft values (points each Pokémon costs, by tier)</p>
+        <div className="flex flex-wrap gap-3">
+          {TIERS.map((t) => (
+            <label key={t} className="flex items-center gap-1.5">
+              <span className="chip" style={{ background: TIER_COLORS[t] }}>{t}</span>
+              <input
+                type="number"
+                min={0}
+                value={tierValues[t] ?? 0}
+                onChange={(e) => setTierValues((v) => ({ ...v, [t]: Number(e.target.value) }))}
+                className="w-16 bg-white/50 rounded px-2 py-1 outline-none"
+              />
+              <span className="text-xs text-ink-soft">pts</span>
+            </label>
+          ))}
+        </div>
+      </div>
 
       {/* Toolbar */}
       <div className="paper p-4 mb-5 space-y-3">
@@ -244,7 +269,9 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
                           <span key={t} className="chip" style={{ background: TYPE_COLORS[t] ?? "#888" }}>{t}</span>
                         ))}
                       </div>
-                      <p className="text-xs text-ink-soft mt-1">Gen {m.gen} · {m.bst} BST</p>
+                      <p className="text-xs text-ink-soft mt-1">
+                        Gen {m.gen} · {m.bst} BST · <span className="font-semibold text-ink">{valueForTier(isIn ? picked[m.id] : suggestTier(m.bst), tierValues)} pts</span>
+                      </p>
                     </div>
                   </div>
                   <p className="text-xs text-ink-soft mt-2 truncate">{m.abilities.join(" · ")}</p>

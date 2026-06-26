@@ -42,6 +42,11 @@ export const TIER_COLORS: Record<string, string> = {
   S: "#d9594c", A: "#dca23e", B: "#2f8f83", C: "#5867a8", D: "#6f6657",
 };
 
+// Draft point value per tier. Defaults the admin can override per format.
+export const DEFAULT_TIER_VALUES: Record<string, number> = { S: 20, A: 16, B: 12, C: 8, D: 4 };
+export const valueForTier = (tier: string, values?: Record<string, number>) =>
+  values?.[tier] ?? DEFAULT_TIER_VALUES[tier] ?? 0;
+
 // A reasonable starting tier based on raw stats — the admin can override per mon.
 export function suggestTier(bst: number): Tier {
   if (bst >= 600) return "S";
@@ -63,6 +68,7 @@ export type Format = {
   name: string;
   includedIds: number[];
   tiers: Record<number, string>; // monId → tier label
+  tierValues?: Record<string, number>; // tier → draft point value
   updatedAt: number;
   ruleset?: { name: string; gimmick: string }; // set when started from a regulation preset
 };

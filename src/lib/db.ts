@@ -8,6 +8,7 @@ export type League = {
   budget: number;
   nomination_mode: string;
   pool: Record<string, string>; // monId → tier
+  tier_values: Record<string, number>; // tier → draft point value
   status: string;
   ruleset: string; // e.g. "VGC 2025 Reg I · Tera" — shown in the room
   created_at: string;
@@ -84,6 +85,7 @@ export async function createLeague(opts: {
   budget: number;
   mode: NominationMode;
   ruleset?: string;
+  tierValues?: Record<string, number>;
 }): Promise<{ league: League; coach: Coach }> {
   const code = makeCode();
   const admin_token = crypto.randomUUID();
@@ -96,6 +98,7 @@ export async function createLeague(opts: {
       budget: opts.budget,
       nomination_mode: opts.mode,
       pool: opts.pool,
+      tier_values: opts.tierValues ?? {},
       status: "drafting",
       ruleset: opts.ruleset ?? "",
     })
@@ -173,9 +176,9 @@ export async function nominate(leagueId: string, monId: number): Promise<void> {
 
 // Snake draft: a coach picks a Pokémon directly onto their team (no bidding).
 // Stored as an already-sold lot so rosters derive exactly like the auction.
-export async function pickDirect(leagueId: string, coachId: string, monId: number): Promise<void> {
+export async function pickDirect(leagueId: string, coachId: string, monId: number, price: number): Promise<void> {
   const { error } = await supabase.from("lots").insert({
-    league_id: leagueId, mon_id: monId, status: "sold", winner_coach_id: coachId, final_price: 0,
+    league_id: leagueId, mon_id: monId, status: "sold", winner_coach_id: coachId, final_price: price,
   });
   if (error) throw error;
 }
