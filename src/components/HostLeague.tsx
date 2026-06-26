@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { loadFormats, type Format } from "@/lib/pokedex";
@@ -24,11 +24,30 @@ export default function HostLeague() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  const hydrated = useRef(false);
+
   useEffect(() => {
     const f = loadFormats();
     setFormats(f);
-    if (f[0]) setFormatId(f[0].id);
+    // Restore an in-progress host form (e.g. after popping over to build a format).
+    let saved: { adminName?: string; leagueName?: string; budget?: number; mode?: NominationMode; formatId?: string } | null = null;
+    try { saved = JSON.parse(sessionStorage.getItem("pokedraft.hostDraft") || "null"); } catch {}
+    if (saved) {
+      setAdminName(saved.adminName ?? "");
+      setLeagueName(saved.leagueName ?? "");
+      if (typeof saved.budget === "number") setBudget(saved.budget);
+      if (saved.mode) setMode(saved.mode);
+    }
+    const savedId = saved?.formatId;
+    if (savedId && f.some((x) => x.id === savedId)) setFormatId(savedId);
+    else if (f[0]) setFormatId(f[0].id);
   }, []);
+
+  // Persist the form on every change so leaving and coming back doesn't lose it.
+  useEffect(() => {
+    if (!hydrated.current) { hydrated.current = true; return; }
+    sessionStorage.setItem("pokedraft.hostDraft", JSON.stringify({ adminName, leagueName, budget, mode, formatId }));
+  }, [adminName, leagueName, budget, mode, formatId]);
 
   async function start() {
     setError("");
@@ -45,6 +64,7 @@ export default function HostLeague() {
         mode,
         ruleset: fmt.ruleset ? `${fmt.ruleset.name} · ${fmt.ruleset.gimmick}` : "",
       });
+      sessionStorage.removeItem("pokedraft.hostDraft");
       router.push(`/room/${league.code}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not create the league.");
@@ -95,13 +115,18 @@ export default function HostLeague() {
               No formats yet — <Link href="/build" className="text-coral underline">build one first</Link>.
             </p>
           ) : (
-            <select className="input" value={formatId} onChange={(e) => setFormatId(e.target.value)}>
-              {formats.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.name} ({f.includedIds.length} Pokémon){f.ruleset ? ` — ${f.ruleset.gimmick}` : ""}
-                </option>
-              ))}
-            </select>
+            <>
+              <select className="input" value={formatId} onChange={(e) => setFormatId(e.target.value)}>
+                {formats.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name} ({f.includedIds.length} Pokémon){f.ruleset ? ` — ${f.ruleset.gimmick}` : ""}
+                  </option>
+                ))}
+              </select>
+              <Link href="/formats" className="text-xs text-coral underline mt-1 inline-block">
+                Build or edit formats
+              </Link>
+            </>
           )}
         </Field>
 
