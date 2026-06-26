@@ -1,0 +1,79 @@
+-- ███ PokéDraft database schema ███
+-- Paste this whole file into your Supabase project's SQL Editor and click "Run".
+-- Safe to run more than once.
+
+-- ── Tables ────────────────────────────────────────────────────────
+create table if not exists leagues (
+  id uuid primary key default gen_random_uuid(),
+  code text unique not null,
+  name text not null,
+  admin_token uuid not null,
+  budget int not null default 100,
+  nomination_mode text not null default 'admin',
+  pool jsonb not null default '{}'::jsonb,  -- { "<monId>": "<tier>" }
+  status text not null default 'lobby',     -- lobby | drafting | done
+  created_at timestamptz not null default now()
+);
+
+create table if not exists coaches (
+  id uuid primary key default gen_random_uuid(),
+  league_id uuid not null references leagues(id) on delete cascade,
+  name text not null,
+  color text not null default '#d9594c',
+  is_admin boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists lots (
+  id uuid primary key default gen_random_uuid(),
+  league_id uuid not null references leagues(id) on delete cascade,
+  mon_id int not null,
+  status text not null default 'active',    -- active | sold | passed
+  winner_coach_id uuid references coaches(id) on delete set null,
+  final_price int,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists bids (
+  id uuid primary key default gen_random_uuid(),
+  league_id uuid not null references leagues(id) on delete cascade,
+  lot_id uuid not null references lots(id) on delete cascade,
+  coach_id uuid not null references coaches(id) on delete cascade,
+  amount int not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_coaches_league on coaches(league_id);
+create index if not exists idx_lots_league on lots(league_id);
+create index if not exists idx_bids_lot on bids(lot_id);
+
+-- ── Realtime (push changes to every connected client) ─────────────
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and tablename='lots') then
+    alter publication supabase_realtime add table lots; end if;
+  if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and tablename='bids') then
+    alter publication supabase_realtime add table bids; end if;
+  if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and tablename='coaches') then
+    alter publication supabase_realtime add table coaches; end if;
+  if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and tablename='leagues') then
+    alter publication supabase_realtime add table leagues; end if;
+end $$;
+
+-- ── Row Level Security ────────────────────────────────────────────
+-- This is a casual friends app with no login, so the anon key is allowed
+-- public access. Anyone with the league code can read/write that room.
+alter table leagues enable row level security;
+alter table coaches enable row level security;
+alter table lots    enable row level security;
+alter table bids    enable row level security;
+
+drop policy if exists p_leagues_all on leagues;
+drop policy if exists p_coaches_all on coaches;
+drop policy if exists p_lots_all    on lots;
+drop policy if exists p_bids_all     on bids;
+
+create policy p_leagues_all on leagues for all using (true) with check (true);
+create policy p_coaches_all on coaches for all using (true) with check (true);
+create policy p_lots_all    on lots    for all using (true) with check (true);
+create policy p_bids_all    on bids    for all using (true) with check (true);
