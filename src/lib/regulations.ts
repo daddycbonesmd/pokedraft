@@ -9,6 +9,7 @@ export type Regulation = {
   banLegends: boolean;
   blurb: string;
   source: string;
+  legalIds?: number[]; // explicit legal pool (Mega regs); Tera regs use svLegalNums
 };
 
 export type RegData = {
@@ -27,25 +28,32 @@ export async function loadRegulations(): Promise<RegData> {
 
 // Build a starting pool (monId → tier) for a regulation. The admin then tweaks it.
 export function poolFromRegulation(dex: PokeMon[], reg: Regulation, data: RegData): Record<number, string> {
-  const sv = new Set(data.svLegalNums);
   const restricted = new Set(data.restrictedNums);
   const mythical = new Set(data.mythicalNums);
-  const nfe = new Set(data.notFullyEvolvedNums ?? []);
   const out: Record<number, string> = {};
 
-  for (const m of dex) {
-    if (!sv.has(m.baseId)) continue;            // must be obtainable in Scarlet/Violet
-    if (nfe.has(m.baseId)) continue;             // draft pools only want fully-evolved Pokémon
-    if (mythical.has(m.baseId)) continue;        // mythicals are banned in VGC
-    if (reg.banLegends && restricted.has(m.baseId)) continue; // Reg H / M-A / M-B
-    if (reg.gimmick === "Mega") {
-      // base species + megas; skip other alt forms (admin can add specifics)
-      if (m.id >= 10000 && !m.isMega) continue;
-    } else {
-      // Tera regs: no megas
-      if (m.isMega) continue;
-      if (m.id >= 10000) continue;
+  // Mega regs (M-A/M-B): use the exact legal list from the format's Showdown mod.
+  if (reg.legalIds && reg.legalIds.length) {
+    const legal = new Set(reg.legalIds);
+    for (const m of dex) {
+      if (!legal.has(m.id)) continue;
+      if (mythical.has(m.baseId)) continue;
+      if (reg.banLegends && restricted.has(m.baseId)) continue;
+      out[m.id] = suggestTier(m.bst);
     }
+    return out;
+  }
+
+  // Tera regs: SV-legal, fully-evolved base species; no megas.
+  const sv = new Set(data.svLegalNums);
+  const nfe = new Set(data.notFullyEvolvedNums ?? []);
+  for (const m of dex) {
+    if (!sv.has(m.baseId)) continue;
+    if (nfe.has(m.baseId)) continue;
+    if (mythical.has(m.baseId)) continue;
+    if (reg.banLegends && restricted.has(m.baseId)) continue;
+    if (m.isMega) continue;
+    if (m.id >= 10000) continue;
     out[m.id] = suggestTier(m.bst);
   }
   return out;

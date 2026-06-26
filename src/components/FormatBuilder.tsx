@@ -38,6 +38,7 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
   const [showMega, setShowMega] = useState(true);
   const [showForms, setShowForms] = useState(false);
   const [onlyPicked, setOnlyPicked] = useState(false);
+  const [sort, setSort] = useState<"dex" | "tier">("dex");
 
   // Load dex + (optionally) an existing format to edit.
   useEffect(() => {
@@ -75,7 +76,14 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
     });
   }, [dex, search, gen, type, showMega, showForms, onlyPicked, picked]);
 
-  const visible = filtered.slice(0, MAX_VISIBLE);
+  const sorted = useMemo(() => {
+    if (sort !== "tier") return filtered;
+    const rank = (m: PokeMon) =>
+      TIERS.indexOf((m.id in picked ? picked[m.id] : suggestTier(m.bst)) as (typeof TIERS)[number]);
+    return [...filtered].sort((a, b) => rank(a) - rank(b) || b.bst - a.bst);
+  }, [filtered, sort, picked]);
+
+  const visible = sorted.slice(0, MAX_VISIBLE);
   const pickedCount = Object.keys(picked).length;
 
   function toggle(m: PokeMon) {
@@ -202,6 +210,14 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
             {ALL_TYPES.map((t) => (
               <option key={t} value={t} className="capitalize">{t}</option>
             ))}
+          </select>
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as "dex" | "tier")}
+            className="bg-white/50 rounded px-3 py-2 outline-none"
+          >
+            <option value="dex">Sort: Dex #</option>
+            <option value="tier">Sort: Tier</option>
           </select>
         </div>
 
