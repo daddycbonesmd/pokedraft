@@ -85,7 +85,7 @@ export default function AuctionDemo() {
           style={{ background: adminPlays ? "var(--plum)" : "var(--ink)", cursor: "pointer" }}
           title="Toggle whether you also field a team"
         >
-          {adminPlays ? "● Admin + playing" : "● Admin only — tap to also play"}
+          {adminPlays ? "Admin + playing" : "Admin only — tap to also play"}
         </button>
       </div>
 
@@ -116,7 +116,7 @@ export default function AuctionDemo() {
                     <h2 className="font-display text-3xl font-black">{current.name}</h2>
                     {current.isMega && (
                       <span className="chip" style={{ background: "var(--indigo)" }}>
-                        ⬡ Mega
+                        Mega
                       </span>
                     )}
                     <span className="chip" style={{ background: "var(--ink)" }}>
@@ -165,7 +165,7 @@ export default function AuctionDemo() {
               <div className="mt-6 flex gap-3 border-t border-dashed border-paper-edge pt-4">
                 {!sold ? (
                   <button className="btn btn-coral" onClick={hammer} disabled={!highCoach}>
-                    🔨 Sold!
+                    Sold!
                   </button>
                 ) : (
                   <button className="btn btn-teal" onClick={nextLot}>

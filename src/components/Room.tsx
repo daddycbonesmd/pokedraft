@@ -158,7 +158,7 @@ export default function Room({ code }: { code: string }) {
                 <div className="flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h2 className="font-display text-3xl font-black">{currentMon.display}</h2>
-                    {currentMon.isMega && <span className="chip" style={{ background: "var(--indigo)" }}>⬡ Mega</span>}
+                    {currentMon.isMega && <span className="chip" style={{ background: "var(--indigo)" }}>Mega</span>}
                     <span className="chip" style={{ background: TIER_COLORS[league.pool[currentMon.id]] ?? "var(--ink)" }}>
                       Tier {league.pool[currentMon.id] ?? "?"}
                     </span>
@@ -184,7 +184,7 @@ export default function Room({ code }: { code: string }) {
 
               {isAdmin && (
                 <div className="mt-6 flex gap-3 border-t border-dashed border-paper-edge pt-4">
-                  <button className="btn btn-coral" onClick={() => act(() => sellLot(activeLot!))} disabled={!highCoach}>🔨 Sold!</button>
+                  <button className="btn btn-coral" onClick={() => act(() => sellLot(activeLot!))} disabled={!highCoach}>Sold!</button>
                   <button className="btn btn-ghost" onClick={() => act(() => passLot(activeLot!.id))}>Pass</button>
                 </div>
               )}
@@ -273,7 +273,7 @@ export default function Room({ code }: { code: string }) {
       {!activeLot && iRevealRandom && (
         <div className="mt-6 text-center">
           <button className="btn btn-coral text-lg px-7 py-3" onClick={revealRandom} disabled={!poolMons.length}>
-            🎲 Reveal random Pokémon
+            Reveal random Pokémon
           </button>
           <p className="text-sm text-ink-soft mt-2">{poolMons.length} still in the pool</p>
         </div>
@@ -287,7 +287,7 @@ export default function Room({ code }: { code: string }) {
           return (
             <div key={c.id} className="paper p-4" style={{ borderTop: `5px solid ${c.color}` }}>
               <div className="flex items-baseline justify-between">
-                <span className="font-display font-bold text-lg">{c.name}{c.is_admin && " ★"}</span>
+                <span className="font-display font-bold text-lg">{c.name}{c.is_admin && " (host)"}</span>
                 <span className="text-sm text-ink-soft">{remaining(c)} pts</span>
               </div>
               <div className="mt-3 space-y-2 min-h-10">

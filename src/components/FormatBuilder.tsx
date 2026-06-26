@@ -138,7 +138,7 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
       {regs && (
         <div className="paper p-4 mb-4">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-semibold text-ink-soft mr-1">⚡ Start from a regulation:</span>
+            <span className="text-sm font-semibold text-ink-soft mr-1">Start from a regulation:</span>
             {regs.presets.map((reg) => (
               <button
                 key={reg.id}
@@ -305,7 +305,7 @@ function Toggle({ on, onClick, children }: { on: boolean; onClick: () => void; c
         border: `1px solid ${on ? "var(--teal)" : "var(--paper-edge)"}`,
       }}
     >
-      {on ? "✓ " : ""}{children}
+      {children}
     </button>
   );
 }
