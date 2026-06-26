@@ -7,7 +7,7 @@ import {
   type League, type Coach,
 } from "@/lib/db";
 import {
-  buildTournament, participants, standings, FORMAT_LABEL,
+  buildTournament, participants, standings, slotState, resolveByes, FORMAT_LABEL,
   type Tournament, type TFormat, type TMatch,
 } from "@/lib/tournament";
 import { supabaseReady } from "@/lib/supabase";
@@ -58,6 +58,7 @@ export default function TournamentView({ code }: { code: string }) {
     try {
       const next: Tournament = structuredClone(t);
       fn(next);
+      resolveByes(next);
       await saveTournament(league!.id, next);
       await refresh();
     } catch (e) {
@@ -106,9 +107,9 @@ export default function TournamentView({ code }: { code: string }) {
               <p className="text-sm font-semibold text-ink-soft mb-2">Choose a format</p>
               <div className="flex flex-wrap gap-2">
                 <button className="btn btn-coral" onClick={() => create("single")}>Single elimination</button>
+                <button className="btn btn-coral" onClick={() => create("double")}>Double elimination</button>
                 <button className="btn btn-teal" onClick={() => create("round_robin")}>Round robin</button>
               </div>
-              <p className="text-xs text-ink-soft mt-2">Double elimination is coming next.</p>
             </div>
           </div>
         )}
@@ -133,8 +134,8 @@ export default function TournamentView({ code }: { code: string }) {
       <div className="paper p-2 w-52">
         {m.label && <p className="text-[11px] text-ink-soft mb-1">{m.label}</p>}
         <div className="space-y-1">
-          {slot(a, m.aSeed === null ? "(bye)" : "TBD")}
-          {slot(b, m.bSeed === null ? "(bye)" : "TBD")}
+          {slot(a, slotState(m, "a", byId) === "empty" ? "(bye)" : "TBD")}
+          {slot(b, slotState(m, "b", byId) === "empty" ? "(bye)" : "TBD")}
         </div>
         {ready && (
           <div className="mt-2 border-t border-dashed border-paper-edge pt-1.5 text-xs">
@@ -170,7 +171,21 @@ export default function TournamentView({ code }: { code: string }) {
     );
   }
 
-  const rounds = Array.from(new Set(t.matches.map((m) => m.round))).sort((a, b) => a - b);
+  function BracketSection({ title, matches }: { title?: string; matches: TMatch[] }) {
+    const rs = Array.from(new Set(matches.map((m) => m.round))).sort((a, b) => a - b);
+    return (
+      <div>
+        {title && <h3 className="font-display text-lg font-bold mb-2">{title}</h3>}
+        <div className="flex gap-6 overflow-x-auto pb-2">
+          {rs.map((r) => (
+            <div key={r} className="flex flex-col gap-4 justify-around shrink-0">
+              {matches.filter((m) => m.round === r).map((m) => <MatchCard key={m.id} m={m} />)}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <main className="max-w-6xl mx-auto px-4 py-8">
@@ -204,14 +219,14 @@ export default function TournamentView({ code }: { code: string }) {
             {t.matches.map((m) => <MatchCard key={m.id} m={m} />)}
           </div>
         </div>
-      ) : (
-        <div className="flex gap-6 overflow-x-auto pb-4">
-          {rounds.map((r) => (
-            <div key={r} className="flex flex-col gap-4 justify-around shrink-0">
-              {t.matches.filter((m) => m.round === r).map((m) => <MatchCard key={m.id} m={m} />)}
-            </div>
-          ))}
+      ) : t.format === "double" ? (
+        <div className="space-y-6">
+          <BracketSection title="Winners bracket" matches={t.matches.filter((m) => m.bracket === "W")} />
+          <BracketSection title="Losers bracket" matches={t.matches.filter((m) => m.bracket === "L")} />
+          <BracketSection title="Grand final" matches={t.matches.filter((m) => m.bracket === "GF")} />
         </div>
+      ) : (
+        <BracketSection matches={t.matches} />
       )}
     </main>
   );
