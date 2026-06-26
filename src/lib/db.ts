@@ -74,7 +74,8 @@ function makeCode() {
 }
 
 // ── League lifecycle ───────────────────────────────────────────────
-export type NominationMode = "admin" | "snake" | "one_random";
+// "snake_draft" = a normal take-turns draft (direct picks, no auction/bidding).
+export type NominationMode = "admin" | "snake" | "one_random" | "snake_draft";
 
 export async function createLeague(opts: {
   name: string;
@@ -167,6 +168,15 @@ export async function getRoomState(leagueId: string): Promise<RoomState> {
 // ── Auction actions ────────────────────────────────────────────────
 export async function nominate(leagueId: string, monId: number): Promise<void> {
   const { error } = await supabase.from("lots").insert({ league_id: leagueId, mon_id: monId, status: "active" });
+  if (error) throw error;
+}
+
+// Snake draft: a coach picks a Pokémon directly onto their team (no bidding).
+// Stored as an already-sold lot so rosters derive exactly like the auction.
+export async function pickDirect(leagueId: string, coachId: string, monId: number): Promise<void> {
+  const { error } = await supabase.from("lots").insert({
+    league_id: leagueId, mon_id: monId, status: "sold", winner_coach_id: coachId, final_price: 0,
+  });
   if (error) throw error;
 }
 

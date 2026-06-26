@@ -18,6 +18,7 @@ import {
   subscribeRoom,
   nominate,
   placeBid,
+  pickDirect,
   sellLot,
   passLot,
   type RoomState,
@@ -45,6 +46,7 @@ export default function Room({ code }: { code: string }) {
   const [increment, setIncrement] = useState(1);
   const [error, setError] = useState("");
   const [fatal, setFatal] = useState("");
+  const [busy, setBusy] = useState(false);
   const leagueIdRef = useRef<string | null>(null);
   const broadcastRef = useRef<((row: Record<string, unknown>) => void) | null>(null);
 
@@ -137,6 +139,7 @@ export default function Room({ code }: { code: string }) {
   const mode = league.nomination_mode;
   const MODE_LABEL: Record<string, string> = {
     admin: "admin choice", snake: "snake nomination", one_random: "one nominated, one random",
+    snake_draft: "snake draft",
   };
   let nominatorId: string | null = null;
   let isRandomTurn = false;
@@ -157,6 +160,104 @@ export default function Room({ code }: { code: string }) {
     if (!poolMons.length) return;
     const m = poolMons[Math.floor(Math.random() * poolMons.length)];
     act(() => nominate(league.id, m.id));
+  }
+
+  // Snake draft (no auction): take turns picking directly, in snake order.
+  const isSnake = mode === "snake_draft";
+  const currentPicker = isSnake ? players[snakeIdx(finishedCount)] ?? null : null;
+  const iPick = Boolean(isSnake && me && currentPicker && me.id === currentPicker.id);
+
+  async function pickMon(monId: number) {
+    if (!me || busy) return;
+    setBusy(true);
+    setError("");
+    try { await pickDirect(league.id, me.id, monId); await refresh(); }
+    catch (e) { setError(e instanceof Error ? e.message : "Pick failed."); }
+    finally { setBusy(false); }
+  }
+
+  if (isSnake) {
+    const draftDone = poolMons.length === 0;
+    return (
+      <div className="max-w-5xl mx-auto px-4 py-6">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-5">
+          <div>
+            <h1 className="font-display text-3xl font-black">
+              {league.name} <span className="hand text-coral text-2xl font-normal">snake draft</span>
+              {league.ruleset && (
+                <span className="chip ml-2 align-middle" style={{ background: "var(--mustard)" }}>{league.ruleset}</span>
+              )}
+            </h1>
+            <p className="text-sm text-ink-soft">
+              Code <span className="font-mono font-bold tracking-widest">{league.code}</span> ·{" "}
+              {coaches.length} coaches · you are <b style={{ color: me?.color }}>{me?.name ?? "a spectator"}</b>
+              {isAdmin && " (admin)"}
+            </p>
+          </div>
+          <Link href="/" className="btn btn-ghost text-sm py-2">Leave</Link>
+        </div>
+
+        {error && <div className="paper p-3 mb-4 text-coral text-sm">{error}</div>}
+
+        <div className="paper p-5 mb-6 text-center">
+          {draftDone ? (
+            <p className="hand text-3xl text-coral">draft complete</p>
+          ) : (
+            <>
+              <p className="hand text-3xl text-coral">{iPick ? "your pick" : `${currentPicker?.name ?? "…"}'s turn`}</p>
+              <p className="text-ink-soft mt-1">Pick {wonLots.length + 1} · {poolMons.length} Pokémon left</p>
+            </>
+          )}
+          {iPick && !draftDone && (
+            <div className="grid gap-2 grid-cols-3 sm:grid-cols-5 lg:grid-cols-7 mt-4">
+              {poolMons.map((m) => (
+                <button key={m.id} disabled={busy} onClick={() => pickMon(m.id)}
+                  className="paper p-2 text-center hover:-translate-y-0.5 transition disabled:opacity-50" title={m.display}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={spriteSmall(m.id)} alt={m.display} width={56} height={56} loading="lazy" className="mx-auto"
+                    onError={(e) => { (e.target as HTMLImageElement).src = spriteSmall(m.baseId); }} />
+                  <span className="block text-xs truncate">{m.display}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {!iPick && !draftDone && (
+            <p className="text-ink-soft text-sm mt-2">Waiting for {currentPicker?.name ?? "the next picker"} to choose.</p>
+          )}
+        </div>
+
+        <h3 className="font-display text-xl font-bold mb-3">Teams</h3>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {coaches.map((c) => {
+            const picks = wonLots.filter((l) => l.winner_coach_id === c.id);
+            const onTurn = !draftDone && currentPicker?.id === c.id;
+            return (
+              <div key={c.id} className="paper p-4"
+                style={{ borderTop: `5px solid ${c.color}`, outline: onTurn ? `2px solid ${c.color}` : undefined }}>
+                <div className="flex items-baseline justify-between">
+                  <span className="font-display font-bold text-lg">{c.name}{c.is_admin && " (host)"}</span>
+                  <span className="text-sm text-ink-soft">{picks.length} picks</span>
+                </div>
+                <div className="mt-3 space-y-2 min-h-10">
+                  {picks.length === 0 && <p className="text-sm text-ink-soft italic">No picks yet</p>}
+                  {picks.map((l) => {
+                    const m = monMap.get(l.mon_id);
+                    return (
+                      <div key={l.id} className="flex items-center gap-2">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={spriteSmall(l.mon_id)} alt="" width={32} height={32} loading="lazy"
+                          onError={(e) => { if (m) (e.target as HTMLImageElement).src = spriteSmall(m.baseId); }} />
+                        <span className="text-sm flex-1 truncate">{m?.display ?? l.mon_id}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
   }
 
   return (

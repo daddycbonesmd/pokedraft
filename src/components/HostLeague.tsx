@@ -8,9 +8,10 @@ import { createLeague, type NominationMode } from "@/lib/db";
 import { supabaseReady } from "@/lib/supabase";
 
 const MODES: { value: NominationMode; label: string; blurb: string }[] = [
-  { value: "admin", label: "Admin choice", blurb: "You pick what goes up for bid each time." },
-  { value: "snake", label: "Snake nomination", blurb: "Coaches take turns nominating (1‑2‑3‑4‑4‑3‑2‑1…)." },
-  { value: "one_random", label: "One nominated, one random", blurb: "A coach's pick, then a random Pokémon — repeating." },
+  { value: "snake_draft", label: "Snake draft (no auction)", blurb: "Take turns picking a Pokémon directly. No bidding or budget. Snake order (1‑2‑3‑4‑4‑3‑2‑1…)." },
+  { value: "admin", label: "Auction — admin choice", blurb: "You pick what goes up for bid each time." },
+  { value: "snake", label: "Auction — snake nomination", blurb: "Coaches take turns nominating, then everyone bids." },
+  { value: "one_random", label: "Auction — one nominated, one random", blurb: "A coach's pick, then a random Pokémon, then repeat." },
 ];
 
 export default function HostLeague() {
@@ -88,10 +89,12 @@ export default function HostLeague() {
         <Field label="League name">
           <input className="input" value={leagueName} onChange={(e) => setLeagueName(e.target.value)} placeholder="Friday Night Draft" />
         </Field>
-        <Field label="Starting budget (points per coach)">
-          <input type="number" className="input" value={budget} min={10} onChange={(e) => setBudget(Number(e.target.value))} />
-        </Field>
-        <Field label="Nomination mode">
+        {mode !== "snake_draft" && (
+          <Field label="Starting budget (points per coach)">
+            <input type="number" className="input" value={budget} min={10} onChange={(e) => setBudget(Number(e.target.value))} />
+          </Field>
+        )}
+        <Field label="Draft format">
           <div className="space-y-2">
             {MODES.map((m) => (
               <button
