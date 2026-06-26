@@ -48,6 +48,7 @@ export default function Room({ code }: { code: string }) {
   const [error, setError] = useState("");
   const [fatal, setFatal] = useState("");
   const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
   const leagueIdRef = useRef<string | null>(null);
   const broadcastRef = useRef<((row: Record<string, unknown>) => void) | null>(null);
 
@@ -186,6 +187,22 @@ export default function Room({ code }: { code: string }) {
     finally { setBusy(false); }
   }
 
+  // Export a coach's team as Pokémon Showdown import text (species skeleton).
+  function copyTeam(coach: Coach) {
+    const text = wonLots
+      .filter((l) => l.winner_coach_id === coach.id)
+      .map((l) => {
+        const m = monMap!.get(l.mon_id);
+        if (!m) return String(l.mon_id);
+        const base = m.isMega ? monMap!.get(m.baseId) : null; // Showdown builds megas from the base species + stone
+        return (base ?? m).display;
+      })
+      .join("\n\n");
+    navigator.clipboard?.writeText(text);
+    setCopied(coach.id);
+    setTimeout(() => setCopied((c) => (c === coach.id ? null : c)), 1500);
+  }
+
   if (isSnake) {
     const draftDone = allFull || poolMons.length === 0;
     return (
@@ -271,6 +288,11 @@ export default function Room({ code }: { code: string }) {
                     );
                   })}
                 </div>
+                {picks.length > 0 && (
+                  <button onClick={() => copyTeam(c)} className="btn btn-ghost text-xs py-1 mt-3 w-full">
+                    {copied === c.id ? "Copied!" : "Copy for Showdown"}
+                  </button>
+                )}
               </div>
             );
           })}
@@ -466,6 +488,11 @@ export default function Room({ code }: { code: string }) {
                   );
                 })}
               </div>
+              {picks.length > 0 && (
+                <button onClick={() => copyTeam(c)} className="btn btn-ghost text-xs py-1 mt-3 w-full">
+                  {copied === c.id ? "Copied!" : "Copy for Showdown"}
+                </button>
+              )}
             </div>
           );
         })}
