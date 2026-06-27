@@ -33,20 +33,21 @@ const myDex = JSON.parse(await readFile(new URL("../public/pokedex.json", import
 const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 const nameToId = new Map(myDex.map((m) => [norm(m.name), m.id]));
 
-// Legal ids for a specific mod = its formats-data entries that aren't isNonstandard.
-async function legalIdsForMod(mod) {
+// The Mega-Dimension mods are override layers with odd/incomplete base-mon data
+// (they wrongly flag top SV mons as nonstandard). So we use the mod ONLY for the
+// legal MEGA list; base species come from real SV legality (like the Tera regs).
+async function legalMegaIds(mod) {
   const txt = await t(MOD(mod));
   const ids = [];
-  let unmatched = 0;
   const re = /^\t(\w+): \{([\s\S]*?)^\t\},?$/gm;
   let m;
   while ((m = re.exec(txt))) {
     if (/isNonstandard/.test(m[2])) continue; // not legal in this format
+    if (!m[1].includes("mega")) continue;       // megas only
     const id = nameToId.get(m[1]);
     if (id != null) ids.push(id);
-    else unmatched++;
   }
-  return { ids, unmatched };
+  return ids;
 }
 
 // ── Per-format gimmick + restricted limit from formats.ts ─────────
@@ -86,9 +87,8 @@ for (const tg of TARGETS) {
     source: got ? "showdown" : "curated",
   };
   if (tg.mod) {
-    const { ids, unmatched } = await legalIdsForMod(tg.mod);
-    preset.legalIds = ids;
-    console.log(`  ${tg.name}: ${ids.length} legal ids from mod '${tg.mod}' (${unmatched} unmatched keys)`);
+    preset.megaIds = await legalMegaIds(tg.mod);
+    console.log(`  ${tg.name}: ${preset.megaIds.length} legal megas from mod '${tg.mod}'`);
   }
   presets.push(preset);
 }
