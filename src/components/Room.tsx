@@ -12,6 +12,7 @@ import {
   TYPE_COLORS,
   TIER_COLORS,
   valueForTier,
+  defenseProfile,
   type PokeMon,
   type MovesData,
 } from "@/lib/pokedex";
@@ -19,6 +20,26 @@ import {
 const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 const moveTitle = (mv: string, info?: { t: string; p: number | null; c: string; d: string }) =>
   info ? [cap(info.t), cap(info.c), info.p ? `${info.p} BP` : null].filter(Boolean).join(" · ") + (info.d ? ` — ${info.d}` : "") : mv;
+
+function TypeEffect({ types }: { types: string[] }) {
+  const dp = defenseProfile(types);
+  const chip = (t: string, suffix = "") => (
+    <span key={t} className="chip" style={{ background: TYPE_COLORS[t] ?? "#888" }}>{t}{suffix}</span>
+  );
+  const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <div className="flex items-baseline gap-1.5 flex-wrap mt-1">
+      <span className="text-xs font-semibold text-ink-soft w-16 shrink-0">{label}</span>
+      {children}
+    </div>
+  );
+  return (
+    <div className="mt-2.5">
+      {dp.weak.length > 0 && <Row label="Weak to">{dp.weak.map(({ t, x }) => chip(t, x === 4 ? " ×4" : ""))}</Row>}
+      {dp.resist.length > 0 && <Row label="Resists">{dp.resist.map(({ t, x }) => chip(t, x === 0.25 ? " ×¼" : ""))}</Row>}
+      {dp.immune.length > 0 && <Row label="Immune">{dp.immune.map((t) => chip(t))}</Row>}
+    </div>
+  );
+}
 import {
   getLeagueByCode,
   getRoomState,
@@ -354,17 +375,18 @@ export default function Room({ code }: { code: string }) {
 
       {error && <div className="paper p-3 mb-4 text-coral text-sm">{error}</div>}
 
-      <div className="grid gap-6 lg:grid-cols-[1.3fr_1fr]">
-        {/* Stage */}
-        <div className="paper creased p-6 relative">
-          {currentMon ? (
-            <>
+      {/* Stage: character (left) + notable moves (right) */}
+      <div className="paper creased p-6 relative">
+        {currentMon ? (
+          <>
+            <div className="grid gap-6 md:grid-cols-[1.5fr_1fr]">
+              {/* Character */}
               <div className="flex items-start gap-5">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={spriteUrl(currentMon.id)} alt={currentMon.display} width={150} height={150}
                   className="drop-shadow-md shrink-0"
                   onError={(e) => { (e.target as HTMLImageElement).src = spriteUrl(currentMon.baseId); }} />
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h2 className="font-display text-3xl font-black">{currentMon.display}</h2>
                     {currentMon.isMega && <span className="chip" style={{ background: "var(--indigo)" }}>Mega</span>}
@@ -391,76 +413,85 @@ export default function Room({ code }: { code: string }) {
                       ))}
                     </ul>
                   </div>
-
-                  {(moves.byMon[currentMon.id]?.length ?? 0) > 0 && (
-                    <div className="mt-2.5 text-sm">
-                      <span className="font-semibold text-ink">Notable moves</span>
-                      <div className="flex flex-wrap gap-1.5 mt-1">
-                        {moves.byMon[currentMon.id].map((mv) => (
-                          <span key={mv} title={moveTitle(mv, moves.info[mv])}
-                            className="cursor-help text-xs font-semibold rounded px-2 py-0.5 text-white"
-                            style={{ background: TYPE_COLORS[moves.info[mv]?.t ?? ""] ?? "var(--ink-soft)" }}>
-                            {mv}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  <p className="mt-4 text-ink-soft">
-                    {highCoach ? (
-                      <>High bid <span className="font-display text-2xl font-black" style={{ color: highCoach.color }}>{highBid!.amount}</span> by <b>{highCoach.name}</b></>
-                    ) : (
-                      <>Opening at <span className="font-display text-2xl font-black">{OPENING}</span></>
-                    )}
-                  </p>
+                  <TypeEffect types={currentMon.types} />
                 </div>
               </div>
 
+              {/* Notable moves */}
+              <div className="md:border-l md:border-dashed md:border-paper-edge md:pl-6">
+                <span className="font-semibold text-ink text-sm">Notable moves</span>
+                {(moves.byMon[currentMon.id]?.length ?? 0) > 0 ? (
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {moves.byMon[currentMon.id].map((mv) => (
+                      <span key={mv} title={moveTitle(mv, moves.info[mv])}
+                        className="cursor-help text-xs font-semibold rounded px-2 py-0.5 text-white"
+                        style={{ background: TYPE_COLORS[moves.info[mv]?.t ?? ""] ?? "var(--ink-soft)" }}>
+                        {mv}
+                      </span>
+                    ))}
+                    <p className="text-[11px] text-ink-soft mt-1 w-full">Hover a move to read it.</p>
+                  </div>
+                ) : <p className="text-xs text-ink-soft mt-1.5 italic">No notable moves listed.</p>}
+              </div>
+            </div>
+
+            {/* High bid + admin controls */}
+            <div className="mt-5 border-t border-dashed border-paper-edge pt-4 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-ink-soft">
+                {highCoach ? (
+                  <>High bid <span className="font-display text-2xl font-black" style={{ color: highCoach.color }}>{highBid!.amount}</span> by <b>{highCoach.name}</b></>
+                ) : (
+                  <>Opening at <span className="font-display text-2xl font-black">{OPENING}</span></>
+                )}
+              </p>
               {isAdmin && (
-                <div className="mt-6 flex gap-3 border-t border-dashed border-paper-edge pt-4">
+                <div className="flex gap-3">
                   <button className="btn btn-coral" onClick={() => act(() => sellLot(activeLot!))} disabled={!highCoach}>Sold!</button>
                   <button className="btn btn-ghost" onClick={() => act(() => passLot(activeLot!.id))}>Pass</button>
                 </div>
               )}
-            </>
-          ) : (
-            <div className="text-center py-14">
-              <p className="hand text-3xl text-coral">
-                {allFull ? "draft complete"
-                  : iNominate ? "your turn to nominate ↓"
-                  : iRevealRandom ? "reveal the random pick ↓"
-                  : isRandomTurn ? "waiting for a random Pokémon…"
-                  : `waiting for ${nominator?.name ?? "the admin"}…`}
-              </p>
-              <p className="text-ink-soft mt-1">
-                {allFull ? "Every team is full."
-                  : iNominate ? "Pick from the pool below to open bidding."
-                  : iRevealRandom ? "Spin up the next random Pokémon."
-                  : "The next Pokémon will appear here."}
-              </p>
             </div>
-          )}
-        </div>
-
-        {/* Live bids + bidding */}
-        <div className="paper p-5">
-          <h3 className="font-display text-lg font-bold mb-3">Live bids</h3>
-          <div className="space-y-2 max-h-56 overflow-auto pr-1">
-            {bids.length === 0 && <p className="text-sm text-ink-soft italic">No bids yet.</p>}
-            {bids.map((b) => {
-              const c = coaches.find((x) => x.id === b.coach_id);
-              return (
-                <div key={b.id} className="flex items-center justify-between rounded bg-white/40 px-3 py-1.5"
-                  style={{ borderLeft: `4px solid ${c?.color ?? "#888"}` }}>
-                  <span className="font-bold">{c?.name ?? "?"}</span>
-                  <span className="font-display font-black">{b.amount}</span>
-                </div>
-              );
-            })}
+          </>
+        ) : (
+          <div className="text-center py-14">
+            <p className="hand text-3xl text-coral">
+              {allFull ? "draft complete"
+                : iNominate ? "your turn to nominate ↓"
+                : iRevealRandom ? "reveal the random pick ↓"
+                : isRandomTurn ? "waiting for a random Pokémon…"
+                : `waiting for ${nominator?.name ?? "the admin"}…`}
+            </p>
+            <p className="text-ink-soft mt-1">
+              {allFull ? "Every team is full."
+                : iNominate ? "Pick from the pool below to open bidding."
+                : iRevealRandom ? "Spin up the next random Pokémon."
+                : "The next Pokémon will appear here."}
+            </p>
           </div>
+        )}
+      </div>
 
-          {me && activeLot && (
-            <div className="mt-4 border-t border-dashed border-paper-edge pt-3">
+      {/* Bidding — underneath the character and moves */}
+      {activeLot && (
+        <div className="paper p-5 mt-6 grid gap-5 sm:grid-cols-2">
+          <div>
+            <h3 className="font-display text-lg font-bold mb-3">Live bids</h3>
+            <div className="space-y-2 max-h-56 overflow-auto pr-1">
+              {bids.length === 0 && <p className="text-sm text-ink-soft italic">No bids yet.</p>}
+              {bids.map((b) => {
+                const c = coaches.find((x) => x.id === b.coach_id);
+                return (
+                  <div key={b.id} className="flex items-center justify-between rounded bg-white/40 px-3 py-1.5"
+                    style={{ borderLeft: `4px solid ${c?.color ?? "#888"}` }}>
+                    <span className="font-bold">{c?.name ?? "?"}</span>
+                    <span className="font-display font-black">{b.amount}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          {me && (
+            <div className="sm:border-l sm:border-dashed sm:border-paper-edge sm:pl-5">
               {iAmHigh ? (
                 <p className="text-sm text-teal-700 font-semibold">You have the top bid.</p>
               ) : (
@@ -482,7 +513,7 @@ export default function Room({ code }: { code: string }) {
             </div>
           )}
         </div>
-      </div>
+      )}
 
       {/* Nomination — pool picker for the current nominator */}
       {!allFull && !activeLot && iNominate && (

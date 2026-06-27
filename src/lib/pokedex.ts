@@ -34,6 +34,49 @@ export const TYPE_COLORS: Record<string, string> = {
 };
 export const ALL_TYPES = Object.keys(TYPE_COLORS);
 
+// Offensive chart: for each attacking type, what it's strong/weak/no-effect against.
+const TYPE_MATCHUPS: Record<string, { weak: string[]; resist: string[]; immune: string[] }> = {
+  normal: { weak: [], resist: ["rock", "steel"], immune: ["ghost"] },
+  fire: { weak: ["grass", "ice", "bug", "steel"], resist: ["fire", "water", "rock", "dragon"], immune: [] },
+  water: { weak: ["fire", "ground", "rock"], resist: ["water", "grass", "dragon"], immune: [] },
+  electric: { weak: ["water", "flying"], resist: ["electric", "grass", "dragon"], immune: ["ground"] },
+  grass: { weak: ["water", "ground", "rock"], resist: ["fire", "grass", "poison", "flying", "bug", "dragon", "steel"], immune: [] },
+  ice: { weak: ["grass", "ground", "flying", "dragon"], resist: ["fire", "water", "ice", "steel"], immune: [] },
+  fighting: { weak: ["normal", "ice", "rock", "dark", "steel"], resist: ["poison", "flying", "psychic", "bug", "fairy"], immune: ["ghost"] },
+  poison: { weak: ["grass", "fairy"], resist: ["poison", "ground", "rock", "ghost"], immune: ["steel"] },
+  ground: { weak: ["fire", "electric", "poison", "rock", "steel"], resist: ["grass", "bug"], immune: ["flying"] },
+  flying: { weak: ["grass", "fighting", "bug"], resist: ["electric", "rock", "steel"], immune: [] },
+  psychic: { weak: ["fighting", "poison"], resist: ["psychic", "steel"], immune: ["dark"] },
+  bug: { weak: ["grass", "psychic", "dark"], resist: ["fire", "fighting", "poison", "flying", "ghost", "steel", "fairy"], immune: [] },
+  rock: { weak: ["fire", "ice", "flying", "bug"], resist: ["fighting", "ground", "steel"], immune: [] },
+  ghost: { weak: ["psychic", "ghost"], resist: ["dark"], immune: ["normal"] },
+  dragon: { weak: ["dragon"], resist: ["steel"], immune: ["fairy"] },
+  dark: { weak: ["psychic", "ghost"], resist: ["fighting", "dark", "fairy"], immune: [] },
+  steel: { weak: ["ice", "rock", "fairy"], resist: ["fire", "water", "electric", "steel"], immune: [] },
+  fairy: { weak: ["fighting", "dragon", "dark"], resist: ["fire", "poison", "steel"], immune: [] },
+};
+
+export type DefenseProfile = { weak: { t: string; x: number }[]; resist: { t: string; x: number }[]; immune: string[] };
+
+// Defensive matchups for a Pokémon's type combo: what hits it hard, what it shrugs off, what can't touch it.
+export function defenseProfile(monTypes: string[]): DefenseProfile {
+  const out: DefenseProfile = { weak: [], resist: [], immune: [] };
+  for (const atk of ALL_TYPES) {
+    let x = 1;
+    for (const def of monTypes) {
+      const mt = TYPE_MATCHUPS[atk];
+      const e = !mt ? 1 : mt.immune.includes(def) ? 0 : mt.weak.includes(def) ? 2 : mt.resist.includes(def) ? 0.5 : 1;
+      x *= e;
+    }
+    if (x === 0) out.immune.push(atk);
+    else if (x > 1) out.weak.push({ t: atk, x });
+    else if (x < 1) out.resist.push({ t: atk, x });
+  }
+  out.weak.sort((a, b) => b.x - a.x);
+  out.resist.sort((a, b) => a.x - b.x);
+  return out;
+}
+
 // Tiers are just organising labels (every Pokémon still opens at 1 in the auction).
 export const TIERS = ["S", "A", "B", "C", "D"] as const;
 export type Tier = (typeof TIERS)[number];
