@@ -33,6 +33,16 @@ const myDex = JSON.parse(await readFile(new URL("../public/pokedex.json", import
 const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 const nameToId = new Map(myDex.map((m) => [norm(m.name), m.id]));
 
+// Showdown default-form keys → PokéAPI form names (where they differ).
+const ALIAS = {
+  taurospaldeacombat: "tauros-paldea-combat-breed", taurospaldeablaze: "tauros-paldea-blaze-breed",
+  taurospaldeaaqua: "tauros-paldea-aqua-breed", basculegion: "basculegion-male", basculegionf: "basculegion-female",
+  meowstic: "meowstic-male", meowsticmmega: "meowstic-male-mega", meowsticfmega: "meowstic-female-mega",
+  aegislash: "aegislash-shield", gourgeist: "gourgeist-average", lycanroc: "lycanroc-midday",
+  mimikyu: "mimikyu-disguised", morpeko: "morpeko-full-belly", palafin: "palafin-zero", maushold: "maushold-family-of-four",
+};
+const lookupId = (key) => nameToId.get(key) ?? (ALIAS[key] ? nameToId.get(norm(ALIAS[key])) : undefined);
+
 // The actual legal roster for a Mega-Dimension reg = its mod's formats-data entries
 // that aren't isNonstandard (this IS Reg M-A / M-B's curated, restricted pool).
 async function legalIdsForMod(mod) {
@@ -43,7 +53,7 @@ async function legalIdsForMod(mod) {
   let m;
   while ((m = re.exec(txt))) {
     if (/isNonstandard/.test(m[2])) continue; // not legal in this format
-    const id = nameToId.get(m[1]);
+    const id = lookupId(m[1]);
     if (id != null) ids.push(id);
     else unmatched++;
   }
