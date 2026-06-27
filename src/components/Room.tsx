@@ -6,13 +6,19 @@ import Link from "next/link";
 import {
   loadPokedex,
   loadAbilities,
+  loadMoves,
   spriteUrl,
   spriteSmall,
   TYPE_COLORS,
   TIER_COLORS,
   valueForTier,
   type PokeMon,
+  type MovesData,
 } from "@/lib/pokedex";
+
+const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+const moveTitle = (mv: string, info?: { t: string; p: number | null; c: string; d: string }) =>
+  info ? [cap(info.t), cap(info.c), info.p ? `${info.p} BP` : null].filter(Boolean).join(" · ") + (info.d ? ` — ${info.d}` : "") : mv;
 import {
   getLeagueByCode,
   getRoomState,
@@ -47,6 +53,7 @@ export default function Room({ code }: { code: string }) {
   const [state, setState] = useState<RoomState | null>(null);
   const [monMap, setMonMap] = useState<Map<number, PokeMon> | null>(null);
   const [abilities, setAbilities] = useState<Record<string, string>>({});
+  const [moves, setMoves] = useState<MovesData>({ byMon: {}, info: {} });
   const [increment, setIncrement] = useState(1);
   const [error, setError] = useState("");
   const [fatal, setFatal] = useState("");
@@ -71,6 +78,7 @@ export default function Room({ code }: { code: string }) {
       const dex = await loadPokedex();
       setMonMap(new Map(dex.map((m) => [m.id, m])));
       loadAbilities().then(setAbilities);
+      loadMoves().then(setMoves);
       await refresh();
       const sub = subscribeRoom(league.id, (evt) => {
         // Bids are the high-frequency path — apply them instantly from the payload.
@@ -383,6 +391,21 @@ export default function Room({ code }: { code: string }) {
                       ))}
                     </ul>
                   </div>
+
+                  {(moves.byMon[currentMon.id]?.length ?? 0) > 0 && (
+                    <div className="mt-2.5 text-sm">
+                      <span className="font-semibold text-ink">Notable moves</span>
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {moves.byMon[currentMon.id].map((mv) => (
+                          <span key={mv} title={moveTitle(mv, moves.info[mv])}
+                            className="cursor-help text-xs font-semibold rounded px-2 py-0.5 text-white"
+                            style={{ background: TYPE_COLORS[moves.info[mv]?.t ?? ""] ?? "var(--ink-soft)" }}>
+                            {mv}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <p className="mt-4 text-ink-soft">
                     {highCoach ? (
                       <>High bid <span className="font-display text-2xl font-black" style={{ color: highCoach.color }}>{highBid!.amount}</span> by <b>{highCoach.name}</b></>

@@ -1,7 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { loadAbilities } from "@/lib/pokedex";
+import { loadAbilities, loadMoves, type MovesData } from "@/lib/pokedex";
+
+const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+const moveTitle = (mv: string, info?: { t: string; p: number | null; c: string; d: string }) =>
+  info ? [cap(info.t), cap(info.c), info.p ? `${info.p} BP` : null].filter(Boolean).join(" · ") + (info.d ? ` — ${info.d}` : "") : mv;
 import {
   COACHES,
   QUEUE,
@@ -24,8 +28,9 @@ export default function AuctionDemo() {
   const [bids, setBids] = useState<BidLog[]>([]);
   const [sold, setSold] = useState<{ coach: Coach; amount: number } | null>(null);
   const [abilities, setAbilities] = useState<Record<string, string>>({});
+  const [moves, setMoves] = useState<MovesData>({ byMon: {}, info: {} });
 
-  useEffect(() => { loadAbilities().then(setAbilities); }, []);
+  useEffect(() => { loadAbilities().then(setAbilities); loadMoves().then(setMoves); }, []);
   const [increment, setIncrement] = useState(1);
   const [adminPlays, setAdminPlays] = useState(false);
 
@@ -147,6 +152,21 @@ export default function AuctionDemo() {
                       ))}
                     </ul>
                   </div>
+
+                  {(moves.byMon[current.id]?.length ?? 0) > 0 && (
+                    <div className="mt-2.5 text-sm">
+                      <span className="font-semibold text-ink">Notable moves</span>
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {moves.byMon[current.id].map((mv) => (
+                          <span key={mv} title={moveTitle(mv, moves.info[mv])}
+                            className="cursor-help text-xs font-semibold rounded px-2 py-0.5 text-white"
+                            style={{ background: TYPE_COLORS[moves.info[mv]?.t ?? ""] ?? "var(--ink-soft)" }}>
+                            {mv}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="mt-4">
                     {highCoach ? (

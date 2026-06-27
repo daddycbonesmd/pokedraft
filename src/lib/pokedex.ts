@@ -68,6 +68,14 @@ export async function loadAbilities(): Promise<Record<string, string>> {
   catch { return {}; }
 }
 
+// Notable signature moves per Pokémon + move details (seeded by scripts/fetch-moves.mjs).
+export type MoveInfo = { t: string; p: number | null; c: string; d: string };
+export type MovesData = { byMon: Record<string, string[]>; info: Record<string, MoveInfo> };
+export async function loadMoves(): Promise<MovesData> {
+  try { const res = await fetch("/moves.json"); return res.ok ? res.json() : { byMon: {}, info: {} }; }
+  catch { return { byMon: {}, info: {} }; }
+}
+
 // ── Format storage (localStorage) ─────────────────────────────────
 export type Format = {
   id: string;
