@@ -92,8 +92,8 @@ function makeCode() {
 }
 
 // ── League lifecycle ───────────────────────────────────────────────
-// "snake_draft" = a normal take-turns draft (direct picks, no auction/bidding).
-export type NominationMode = "admin" | "snake" | "one_random" | "snake_draft";
+// "snake_draft" = take-turns direct picks; "full_random" = teams assigned randomly.
+export type NominationMode = "admin" | "snake" | "one_random" | "snake_draft" | "full_random";
 
 export async function createLeague(opts: {
   name: string;
@@ -205,6 +205,20 @@ export async function pickDirect(leagueId: string, coachId: string, monId: numbe
   const { error } = await supabase.from("lots").insert({
     league_id: leagueId, mon_id: monId, status: "sold", winner_coach_id: coachId, final_price: price,
   });
+  if (error) throw error;
+}
+
+// Full-random draft: wipe any existing picks and assign whole teams at once.
+export async function clearLots(leagueId: string): Promise<void> {
+  const { error } = await supabase.from("lots").delete().eq("league_id", leagueId);
+  if (error) throw error;
+}
+export async function bulkPick(leagueId: string, picks: { coachId: string; monId: number; price: number }[]): Promise<void> {
+  if (!picks.length) return;
+  const rows = picks.map((p) => ({
+    league_id: leagueId, mon_id: p.monId, status: "sold", winner_coach_id: p.coachId, final_price: p.price,
+  }));
+  const { error } = await supabase.from("lots").insert(rows);
   if (error) throw error;
 }
 

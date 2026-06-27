@@ -48,6 +48,8 @@ import {
   nominate,
   placeBid,
   pickDirect,
+  clearLots,
+  bulkPick,
   sellLot,
   passLot,
   type RoomState,
@@ -178,7 +180,7 @@ export default function Room({ code }: { code: string }) {
   const mode = league.nomination_mode;
   const MODE_LABEL: Record<string, string> = {
     admin: "admin choice", snake: "snake nomination", one_random: "one nominated, one random",
-    snake_draft: "snake draft",
+    snake_draft: "snake draft", full_random: "random draft",
   };
   let nominatorId: string | null = null;
   let isRandomTurn = false;
@@ -205,6 +207,7 @@ export default function Room({ code }: { code: string }) {
   const isSnake = mode === "snake_draft";
   const currentPicker = isSnake ? players[snakeIdx(finishedCount)] ?? null : null;
   const iPick = Boolean(isSnake && me && currentPicker && me.id === currentPicker.id && !isFull(me));
+  const isRandomDraft = mode === "full_random";
 
   const monValue = (monId: number) => valueForTier(league.pool[monId], league.tier_values);
 
@@ -233,6 +236,26 @@ export default function Room({ code }: { code: string }) {
     setState((s) => (s ? { ...s, activeLot: optimistic, bids: [] } : s));
     nominate(league.id, monId).then(refresh)
       .catch((e) => { setError(e instanceof Error ? e.message : "Could not nominate."); refresh(); });
+  }
+
+  // Full random: deal teamSize random Pokémon to each coach (replacing any prior result).
+  function randomize() {
+    if (!coaches.length) return;
+    const poolIds = Object.keys(league.pool).map(Number).filter((id) => monMap!.has(id));
+    for (let i = poolIds.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [poolIds[i], poolIds[j]] = [poolIds[j], poolIds[i]];
+    }
+    const picks: { coachId: string; monId: number; price: number }[] = [];
+    let i = 0;
+    for (let r = 0; r < teamSize && i < poolIds.length; r++) {
+      for (const c of coaches) {
+        if (i >= poolIds.length) break;
+        const monId = poolIds[i++];
+        picks.push({ coachId: c.id, monId, price: monValue(monId) });
+      }
+    }
+    act(async () => { await clearLots(league.id); await bulkPick(league.id, picks); });
   }
 
   // Export a coach's team as Pokémon Showdown import text (species skeleton).
@@ -323,6 +346,90 @@ export default function Room({ code }: { code: string }) {
                 </div>
                 <div className="mt-3 space-y-2 min-h-10">
                   {picks.length === 0 && <p className="text-sm text-ink-soft italic">No picks yet</p>}
+                  {picks.map((l) => {
+                    const m = monMap.get(l.mon_id);
+                    return (
+                      <div key={l.id} className="flex items-center gap-2">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={spriteSmall(l.mon_id)} alt="" width={32} height={32} loading="lazy"
+                          onError={(e) => { if (m) (e.target as HTMLImageElement).src = spriteSmall(m.baseId); }} />
+                        <span className="text-sm flex-1 truncate">{m?.display ?? l.mon_id}</span>
+                        <span className="text-xs text-ink-soft font-mono">{l.final_price}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                {picks.length > 0 && (
+                  <button onClick={() => copyTeam(c)} className="btn btn-ghost text-xs py-1 mt-3 w-full">
+                    {copied === c.id ? "Copied!" : "Copy for Showdown"}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  if (isRandomDraft) {
+    const drafted = wonLots.length > 0;
+    return (
+      <div className="max-w-5xl mx-auto px-4 py-6">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-5">
+          <div>
+            <h1 className="font-display text-3xl font-black">
+              {league.name} <span className="hand text-coral text-2xl font-normal">random draft</span>
+              {league.ruleset && (
+                <span className="chip ml-2 align-middle" style={{ background: "var(--mustard)" }}>{league.ruleset}</span>
+              )}
+            </h1>
+            <p className="text-sm text-ink-soft">
+              Code <span className="font-mono font-bold tracking-widest">{league.code}</span> ·{" "}
+              {coaches.length} coaches · you are <b style={{ color: me?.color }}>{me?.name ?? "a spectator"}</b>
+              {isAdmin && " (admin)"}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Link href={`/tournament/${league.code}`} className="btn btn-ghost text-sm py-2">Tournament</Link>
+            <Link href="/" className="btn btn-ghost text-sm py-2">Leave</Link>
+          </div>
+        </div>
+
+        {error && <div className="paper p-3 mb-4 text-coral text-sm">{error}</div>}
+
+        <div className="paper p-5 mb-6 text-center">
+          {!drafted ? (
+            isAdmin ? (
+              <>
+                <p className="hand text-3xl text-coral">ready to randomize</p>
+                <p className="text-ink-soft mt-1">Each coach gets {teamSize} random Pokémon from the pool.</p>
+                <button className="btn btn-coral text-lg px-7 py-3 mt-4" onClick={randomize} disabled={!coaches.length}>Randomize teams</button>
+              </>
+            ) : (
+              <p className="hand text-3xl text-coral">waiting for the admin to randomize…</p>
+            )
+          ) : (
+            <>
+              <p className="hand text-3xl text-coral">teams are set</p>
+              {isAdmin && <button className="btn btn-ghost mt-3" onClick={randomize}>Re-randomize</button>}
+            </>
+          )}
+        </div>
+
+        <h3 className="font-display text-xl font-bold mb-3">Teams</h3>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {coaches.map((c) => {
+            const picks = wonLots.filter((l) => l.winner_coach_id === c.id);
+            const total = picks.reduce((s, l) => s + (l.final_price ?? 0), 0);
+            return (
+              <div key={c.id} className="paper p-4" style={{ borderTop: `5px solid ${c.color}` }}>
+                <div className="flex items-baseline justify-between">
+                  <span className="font-display font-bold text-lg">{c.name}{c.is_admin && " (host)"}</span>
+                  <span className="text-sm text-ink-soft">{total} pts</span>
+                </div>
+                <div className="mt-3 space-y-2 min-h-10">
+                  {picks.length === 0 && <p className="text-sm text-ink-soft italic">—</p>}
                   {picks.map((l) => {
                     const m = monMap.get(l.mon_id);
                     return (

@@ -9,6 +9,7 @@ import { supabaseReady } from "@/lib/supabase";
 
 const MODES: { value: NominationMode; label: string; blurb: string }[] = [
   { value: "snake_draft", label: "Snake draft (no auction)", blurb: "Take turns picking a Pokémon directly. No bidding or budget. Snake order (1‑2‑3‑4‑4‑3‑2‑1…)." },
+  { value: "full_random", label: "Full random", blurb: "Everyone's team is assigned randomly from the pool. One button, no picking." },
   { value: "admin", label: "Auction — admin choice", blurb: "You pick what goes up for bid each time." },
   { value: "snake", label: "Auction — snake nomination", blurb: "Coaches take turns nominating, then everyone bids." },
   { value: "one_random", label: "Auction — one nominated, one random", blurb: "A coach's pick, then a random Pokémon, then repeat." },
