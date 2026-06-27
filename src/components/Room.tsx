@@ -26,6 +26,7 @@ import {
   type RoomState,
   type Coach,
   type Bid,
+  type Lot,
 } from "@/lib/db";
 import { supabaseReady } from "@/lib/supabase";
 import { EnvNotice } from "./HostLeague";
@@ -49,7 +50,6 @@ export default function Room({ code }: { code: string }) {
   const [increment, setIncrement] = useState(1);
   const [error, setError] = useState("");
   const [fatal, setFatal] = useState("");
-  const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const leagueIdRef = useRef<string | null>(null);
   const broadcastRef = useRef<((row: Record<string, unknown>) => void) | null>(null);
@@ -169,7 +169,7 @@ export default function Room({ code }: { code: string }) {
   function revealRandom() {
     if (!poolMons.length) return;
     const m = poolMons[Math.floor(Math.random() * poolMons.length)];
-    act(() => nominate(league.id, m.id));
+    nominateMon(m.id);
   }
 
   // Snake draft (no auction): take turns picking directly, in snake order.
@@ -179,15 +179,31 @@ export default function Room({ code }: { code: string }) {
 
   const monValue = (monId: number) => valueForTier(league.pool[monId], league.tier_values);
 
-  async function pickMon(monId: number) {
-    if (!me || busy) return;
+  // Snake pick — show it instantly, then persist (realtime/refresh reconciles).
+  function pickMon(monId: number) {
+    if (!me || soldIds.has(monId)) return;
     const price = monValue(monId);
     if (remaining(me) < price) { setError("Not enough points for that pick."); return; }
-    setBusy(true);
     setError("");
-    try { await pickDirect(league.id, me.id, monId, price); await refresh(); }
-    catch (e) { setError(e instanceof Error ? e.message : "Pick failed."); }
-    finally { setBusy(false); }
+    const optimistic: Lot = {
+      id: `temp-${monId}`, league_id: league.id, mon_id: monId, status: "sold",
+      winner_coach_id: me.id, final_price: price, created_at: new Date().toISOString(),
+    };
+    setState((s) => (s ? { ...s, wonLots: [...s.wonLots, optimistic], finishedCount: s.finishedCount + 1 } : s));
+    pickDirect(league.id, me.id, monId, price).then(refresh)
+      .catch((e) => { setError(e instanceof Error ? e.message : "Pick failed."); refresh(); });
+  }
+
+  // Auction nomination — put the Pokémon on stage instantly, then persist.
+  function nominateMon(monId: number) {
+    setError("");
+    const optimistic: Lot = {
+      id: `temp-lot-${monId}`, league_id: league.id, mon_id: monId, status: "active",
+      winner_coach_id: null, final_price: null, created_at: new Date().toISOString(),
+    };
+    setState((s) => (s ? { ...s, activeLot: optimistic, bids: [] } : s));
+    nominate(league.id, monId).then(refresh)
+      .catch((e) => { setError(e instanceof Error ? e.message : "Could not nominate."); refresh(); });
   }
 
   // Export a coach's team as Pokémon Showdown import text (species skeleton).
@@ -247,7 +263,7 @@ export default function Room({ code }: { code: string }) {
                 const v = monValue(m.id);
                 const afford = !me || remaining(me) >= v;
                 return (
-                  <button key={m.id} disabled={busy || !afford} onClick={() => pickMon(m.id)}
+                  <button key={m.id} disabled={!afford} onClick={() => pickMon(m.id)}
                     className="paper p-2 text-center hover:-translate-y-0.5 transition disabled:opacity-40" title={`${m.display} · ${v} pts`}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={spriteSmall(m.id)} alt={m.display} width={56} height={56} loading="lazy" className="mx-auto"
@@ -453,7 +469,7 @@ export default function Room({ code }: { code: string }) {
           </h3>
           <div className="grid gap-2 grid-cols-3 sm:grid-cols-5 lg:grid-cols-7">
             {poolMons.map((m) => (
-              <button key={m.id} onClick={() => act(() => nominate(league.id, m.id))}
+              <button key={m.id} onClick={() => nominateMon(m.id)}
                 className="paper p-2 text-center hover:-translate-y-0.5 transition" title={m.display}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={spriteSmall(m.id)} alt={m.display} width={56} height={56} loading="lazy" className="mx-auto"
