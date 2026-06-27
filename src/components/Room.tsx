@@ -50,6 +50,7 @@ import {
   pickDirect,
   clearLots,
   bulkPick,
+  buyLot,
   sellLot,
   passLot,
   type RoomState,
@@ -180,7 +181,8 @@ export default function Room({ code }: { code: string }) {
   const mode = league.nomination_mode;
   const MODE_LABEL: Record<string, string> = {
     admin: "admin choice", snake: "snake nomination", one_random: "one nominated, one random",
-    snake_draft: "snake draft", full_random: "random draft",
+    auction_random: "fully random auction", snake_draft: "point buy (snake)",
+    pointbuy_random: "point buy (random)", full_random: "random teams",
   };
   let nominatorId: string | null = null;
   let isRandomTurn = false;
@@ -188,8 +190,10 @@ export default function Room({ code }: { code: string }) {
     nominatorId = players.find((p) => p.is_admin)?.id ?? null;
   } else if (mode === "snake") {
     nominatorId = players[snakeIdx(finishedCount)]?.id ?? null;
-  } else {
-    // one_random: even turns are a coach nomination, odd turns are a random reveal
+  } else if (mode === "auction_random") {
+    isRandomTurn = true; // every lot is a random reveal
+  } else if (mode === "one_random") {
+    // even turns are a coach nomination, odd turns are a random reveal
     if (finishedCount % 2 === 0) nominatorId = players[snakeIdx(finishedCount / 2)]?.id ?? null;
     else isRandomTurn = true;
   }
@@ -203,11 +207,19 @@ export default function Room({ code }: { code: string }) {
     nominateMon(m.id);
   }
 
+  // Point-buy reveal must persist the real lot before a Buy can target it (no optimistic id).
+  function revealForBuy() {
+    if (!poolMons.length) return;
+    const m = poolMons[Math.floor(Math.random() * poolMons.length)];
+    act(() => nominate(league.id, m.id));
+  }
+
   // Snake draft (no auction): take turns picking directly, in snake order.
   const isSnake = mode === "snake_draft";
   const currentPicker = isSnake ? players[snakeIdx(finishedCount)] ?? null : null;
   const iPick = Boolean(isSnake && me && currentPicker && me.id === currentPicker.id && !isFull(me));
   const isRandomDraft = mode === "full_random";
+  const isPointbuy = mode === "pointbuy_random";
 
   const monValue = (monId: number) => valueForTier(league.pool[monId], league.tier_values);
 
@@ -258,6 +270,14 @@ export default function Room({ code }: { code: string }) {
     act(async () => { await clearLots(league.id); await bulkPick(league.id, picks); });
   }
 
+  // Point buy random: the current coach buys the offered Pokémon at its point cost.
+  function buyOffer() {
+    if (!me || !activeLot) return;
+    const price = monValue(activeLot.mon_id);
+    if (remaining(me) < price) { setError("Not enough points for that."); return; }
+    act(() => buyLot(activeLot!.id, me.id, price));
+  }
+
   // Export a coach's team as Pokémon Showdown import text (species skeleton).
   function copyTeam(coach: Coach) {
     const text = wonLots
@@ -292,7 +312,7 @@ export default function Room({ code }: { code: string }) {
               {isAdmin && " (admin)"}
             </p>
           </div>
-          <Link href="/" className="btn btn-ghost text-sm py-2">Leave</Link>
+          <Link href="/" className="btn btn-ghost text-sm py-2">← Home</Link>
         </div>
 
         {error && <div className="paper p-3 mb-4 text-coral text-sm">{error}</div>}
@@ -392,7 +412,7 @@ export default function Room({ code }: { code: string }) {
           </div>
           <div className="flex gap-2">
             <Link href={`/tournament/${league.code}`} className="btn btn-ghost text-sm py-2">Tournament</Link>
-            <Link href="/" className="btn btn-ghost text-sm py-2">Leave</Link>
+            <Link href="/" className="btn btn-ghost text-sm py-2">← Home</Link>
           </div>
         </div>
 
@@ -456,6 +476,120 @@ export default function Room({ code }: { code: string }) {
     );
   }
 
+  if (isPointbuy) {
+    const cp = players[snakeIdx(finishedCount)] ?? null;
+    const iTurn = Boolean(me && cp && me.id === cp.id && !isFull(me));
+    const offer = activeLot ? monMap.get(activeLot.mon_id) ?? null : null;
+    const cost = offer ? monValue(offer.id) : 0;
+    const done = allFull || (!offer && poolMons.length === 0);
+    return (
+      <div className="max-w-5xl mx-auto px-4 py-6">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-5">
+          <div>
+            <h1 className="font-display text-3xl font-black">
+              {league.name} <span className="hand text-coral text-2xl font-normal">point buy · random</span>
+              {league.ruleset && (<span className="chip ml-2 align-middle" style={{ background: "var(--mustard)" }}>{league.ruleset}</span>)}
+            </h1>
+            <p className="text-sm text-ink-soft">
+              Code <span className="font-mono font-bold tracking-widest">{league.code}</span> · {coaches.length} coaches · you are{" "}
+              <b style={{ color: me?.color }}>{me?.name ?? "a spectator"}</b>{isAdmin && " (admin)"}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Link href={`/tournament/${league.code}`} className="btn btn-ghost text-sm py-2">Tournament</Link>
+            <Link href="/" className="btn btn-ghost text-sm py-2">← Home</Link>
+          </div>
+        </div>
+
+        {error && <div className="paper p-3 mb-4 text-coral text-sm">{error}</div>}
+
+        <div className="paper creased p-6 mb-6">
+          {done ? (
+            <p className="hand text-3xl text-coral text-center py-6">draft complete</p>
+          ) : offer ? (
+            <>
+              <div className="flex items-start gap-5">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={spriteUrl(offer.id)} alt={offer.display} width={130} height={130} className="drop-shadow-md shrink-0"
+                  onError={(e) => { (e.target as HTMLImageElement).src = spriteUrl(offer.baseId); }} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="font-display text-2xl font-black">{offer.display}</h2>
+                    {offer.isMega && <span className="chip" style={{ background: "var(--indigo)" }}>Mega</span>}
+                    <span className="chip" style={{ background: TIER_COLORS[league.pool[offer.id]] ?? "var(--ink)" }}>Tier {league.pool[offer.id] ?? "?"}</span>
+                    <span className="chip" style={{ background: "var(--ink-soft)" }}>{cost} pts</span>
+                  </div>
+                  <div className="flex gap-1.5 mt-2">
+                    {offer.types.map((t) => (<span key={t} className="chip" style={{ background: TYPE_COLORS[t] ?? "#888" }}>{t}</span>))}
+                  </div>
+                  <TypeEffect types={offer.types} />
+                  {(moves.byMon[offer.id]?.length ?? 0) > 0 && (
+                    <div className="mt-2.5 flex flex-wrap gap-1.5">
+                      {moves.byMon[offer.id].map((mv) => (
+                        <span key={mv} title={moveTitle(mv, moves.info[mv])} className="cursor-help text-xs font-semibold rounded px-2 py-0.5 text-white"
+                          style={{ background: TYPE_COLORS[moves.info[mv]?.t ?? ""] ?? "var(--ink-soft)" }}>{mv}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="mt-5 border-t border-dashed border-paper-edge pt-4 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-ink-soft">{me ? `${remaining(me)} pts left` : ""}</p>
+                {iTurn ? (
+                  <div className="flex gap-3">
+                    <button className="btn btn-teal" disabled={!me || remaining(me) < cost} onClick={buyOffer}>
+                      {me && remaining(me) < cost ? "Can't afford" : `Buy · ${cost} pts`}
+                    </button>
+                    <button className="btn btn-ghost" onClick={() => act(() => passLot(activeLot!.id))}>Pass</button>
+                  </div>
+                ) : <p className="text-ink-soft text-sm"><b>{cp?.name ?? "…"}</b> is deciding…</p>}
+              </div>
+            </>
+          ) : (
+            <div className="text-center py-8">
+              <p className="hand text-3xl text-coral">{iTurn ? "your turn" : `${cp?.name ?? "…"}'s turn`}</p>
+              {iTurn ? (
+                <button className="btn btn-coral text-lg px-7 py-3 mt-3" onClick={revealForBuy} disabled={!poolMons.length}>Reveal a random Pokémon</button>
+              ) : <p className="text-ink-soft mt-1">Waiting for {cp?.name ?? "the next coach"} to reveal.</p>}
+            </div>
+          )}
+        </div>
+
+        <h3 className="font-display text-xl font-bold mb-3">Teams</h3>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {coaches.map((c) => {
+            const picks = wonLots.filter((l) => l.winner_coach_id === c.id);
+            return (
+              <div key={c.id} className="paper p-4" style={{ borderTop: `5px solid ${c.color}` }}>
+                <div className="flex items-baseline justify-between">
+                  <span className="font-display font-bold text-lg">{c.name}{c.is_admin && " (host)"}</span>
+                  <span className="text-sm text-ink-soft">{remaining(c)} pts · {picks.length}/{teamSize}</span>
+                </div>
+                <div className="mt-3 space-y-2 min-h-10">
+                  {picks.length === 0 && <p className="text-sm text-ink-soft italic">No picks yet</p>}
+                  {picks.map((l) => {
+                    const m = monMap.get(l.mon_id);
+                    return (
+                      <div key={l.id} className="flex items-center gap-2">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={spriteSmall(l.mon_id)} alt="" width={32} height={32} loading="lazy" onError={(e) => { if (m) (e.target as HTMLImageElement).src = spriteSmall(m.baseId); }} />
+                        <span className="text-sm flex-1 truncate">{m?.display ?? l.mon_id}</span>
+                        <span className="text-xs text-ink-soft font-mono">{l.final_price}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                {picks.length > 0 && (
+                  <button onClick={() => copyTeam(c)} className="btn btn-ghost text-xs py-1 mt-3 w-full">{copied === c.id ? "Copied!" : "Copy for Showdown"}</button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-6">
       {/* Header */}
@@ -476,7 +610,7 @@ export default function Room({ code }: { code: string }) {
         </div>
         <div className="flex gap-2">
           <Link href={`/tournament/${league.code}`} className="btn btn-ghost text-sm py-2">Tournament</Link>
-          <Link href="/" className="btn btn-ghost text-sm py-2">Leave</Link>
+          <Link href="/" className="btn btn-ghost text-sm py-2">← Home</Link>
         </div>
       </div>
 

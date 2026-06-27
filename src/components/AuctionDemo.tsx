@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { loadAbilities, loadMoves, type MovesData } from "@/lib/pokedex";
 
 const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
@@ -76,8 +77,9 @@ export default function AuctionDemo() {
 
   return (
     <div className="w-full max-w-5xl mx-auto px-4 py-8">
+      <Link href="/" className="text-sm text-ink-soft hover:underline">← Home</Link>
       {/* header bar */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-6 mt-1">
         <div>
           <h1 className="font-display text-3xl font-black">
             Poké<span className="text-coral">Draft</span>{" "}

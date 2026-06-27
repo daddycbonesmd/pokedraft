@@ -8,11 +8,13 @@ import { createLeague, type NominationMode } from "@/lib/db";
 import { supabaseReady } from "@/lib/supabase";
 
 const MODES: { value: NominationMode; label: string; blurb: string }[] = [
-  { value: "snake_draft", label: "Snake draft (no auction)", blurb: "Take turns picking a Pokémon directly. No bidding or budget. Snake order (1‑2‑3‑4‑4‑3‑2‑1…)." },
-  { value: "full_random", label: "Full random", blurb: "Everyone's team is assigned randomly from the pool. One button, no picking." },
-  { value: "admin", label: "Auction — admin choice", blurb: "You pick what goes up for bid each time." },
+  { value: "snake_draft", label: "Point buy — snake", blurb: "Take turns picking any Pokémon, paying its points. Snake order (1‑2‑3‑4‑4‑3‑2‑1…)." },
+  { value: "pointbuy_random", label: "Point buy — random", blurb: "On your turn a random Pokémon is offered — buy it for its points or pass it." },
+  { value: "admin", label: "Auction — admin choice", blurb: "You pick what goes up for bid each time, then everyone bids." },
   { value: "snake", label: "Auction — snake nomination", blurb: "Coaches take turns nominating, then everyone bids." },
-  { value: "one_random", label: "Auction — one nominated, one random", blurb: "A coach's pick, then a random Pokémon, then repeat." },
+  { value: "one_random", label: "Auction — one nominated, one random", blurb: "A coach's nomination, then a random Pokémon, repeating." },
+  { value: "auction_random", label: "Auction — fully random", blurb: "Every Pokémon up for bid is random. Everyone bids on each one." },
+  { value: "full_random", label: "Random teams (instant)", blurb: "Everyone's whole team is assigned at random in one click. No bidding or picking." },
 ];
 
 export default function HostLeague() {

@@ -92,8 +92,11 @@ function makeCode() {
 }
 
 // ── League lifecycle ───────────────────────────────────────────────
-// "snake_draft" = take-turns direct picks; "full_random" = teams assigned randomly.
-export type NominationMode = "admin" | "snake" | "one_random" | "snake_draft" | "full_random";
+// Draft modes: auction nominations (admin/snake/one_random/auction_random),
+// direct point-buy (snake_draft, pointbuy_random), and instant random teams (full_random).
+export type NominationMode =
+  | "admin" | "snake" | "one_random" | "auction_random"
+  | "snake_draft" | "pointbuy_random" | "full_random";
 
 export async function createLeague(opts: {
   name: string;
@@ -219,6 +222,13 @@ export async function bulkPick(leagueId: string, picks: { coachId: string; monId
     league_id: leagueId, mon_id: p.monId, status: "sold", winner_coach_id: p.coachId, final_price: p.price,
   }));
   const { error } = await supabase.from("lots").insert(rows);
+  if (error) throw error;
+}
+
+// Point-buy random: the current coach buys the offered (active) lot at its point cost.
+export async function buyLot(lotId: string, coachId: string, price: number): Promise<void> {
+  const { error } = await supabase.from("lots")
+    .update({ status: "sold", winner_coach_id: coachId, final_price: price }).eq("id", lotId);
   if (error) throw error;
 }
 
