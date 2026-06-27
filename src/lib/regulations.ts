@@ -9,7 +9,7 @@ export type Regulation = {
   banLegends: boolean;
   blurb: string;
   source: string;
-  megaIds?: number[]; // Mega regs: which mega forms are legal (base species come from SV legality)
+  legalIds?: number[]; // Mega regs (M-A/M-B): the exact legal roster from the format's mod
 };
 
 export type RegData = {
@@ -28,29 +28,25 @@ export async function loadRegulations(): Promise<RegData> {
 
 // Build a starting pool (monId → tier) for a regulation. The admin then tweaks it.
 export function poolFromRegulation(dex: PokeMon[], reg: Regulation, data: RegData): Record<number, string> {
+  const out: Record<number, string> = {};
+
+  // Mega regs (M-A/M-B): use the format's exact legal roster from its Showdown mod.
+  if (reg.legalIds && reg.legalIds.length) {
+    const legal = new Set(reg.legalIds);
+    for (const m of dex) if (legal.has(m.id)) out[m.id] = suggestTier(m.bst);
+    return out;
+  }
+
+  // Tera regs: SV-legal, fully-evolved base species; no megas.
   const restricted = new Set(data.restrictedNums);
   const mythical = new Set(data.mythicalNums);
   const sv = new Set(data.svLegalNums);
   const nfe = new Set(data.notFullyEvolvedNums ?? []);
-  const out: Record<number, string> = {};
-
-  // A base species is in the pool if it's a fully-evolved, non-mythical SV mon
-  // (and not a restricted legendary when the format bans those).
-  const baseOk = (m: PokeMon) =>
-    sv.has(m.baseId) && !nfe.has(m.baseId) && !mythical.has(m.baseId) &&
-    !(reg.banLegends && restricted.has(m.baseId));
-
-  const megaSet = new Set(reg.megaIds ?? []);
   for (const m of dex) {
-    if (m.isMega) {
-      // Mega regs add the format's legal megas (Tera regs include none).
-      if (megaSet.has(m.id) && !mythical.has(m.baseId) && !(reg.banLegends && restricted.has(m.baseId))) {
-        out[m.id] = suggestTier(m.bst);
-      }
-      continue;
-    }
-    if (m.id >= 10000) continue; // skip other alt forms
-    if (baseOk(m)) out[m.id] = suggestTier(m.bst);
+    if (m.isMega || m.id >= 10000) continue;
+    if (!sv.has(m.baseId) || nfe.has(m.baseId) || mythical.has(m.baseId)) continue;
+    if (reg.banLegends && restricted.has(m.baseId)) continue;
+    out[m.id] = suggestTier(m.bst);
   }
   return out;
 }
