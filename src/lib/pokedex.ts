@@ -62,6 +62,12 @@ export async function loadPokedex(): Promise<PokeMon[]> {
   return res.json();
 }
 
+// Ability name → short description (seeded by scripts/fetch-abilities.mjs).
+export async function loadAbilities(): Promise<Record<string, string>> {
+  try { const res = await fetch("/abilities.json"); return res.ok ? res.json() : {}; }
+  catch { return {}; }
+}
+
 // ── Format storage (localStorage) ─────────────────────────────────
 export type Format = {
   id: string;

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { loadAbilities } from "@/lib/pokedex";
 import {
   COACHES,
   QUEUE,
@@ -22,6 +23,9 @@ export default function AuctionDemo() {
   const [queue, setQueue] = useState<Mon[]>(QUEUE);
   const [bids, setBids] = useState<BidLog[]>([]);
   const [sold, setSold] = useState<{ coach: Coach; amount: number } | null>(null);
+  const [abilities, setAbilities] = useState<Record<string, string>>({});
+
+  useEffect(() => { loadAbilities().then(setAbilities); }, []);
   const [increment, setIncrement] = useState(1);
   const [adminPlays, setAdminPlays] = useState(false);
 
@@ -132,12 +136,17 @@ export default function AuctionDemo() {
                   </div>
 
                   {/* Abilities — for a mega this is its mega ability */}
-                  <p className="mt-2.5 text-sm text-ink-soft">
-                    <span className="font-semibold text-ink">
-                      {current.isMega ? "Mega ability:" : "Abilities:"}
-                    </span>{" "}
-                    {current.abilities.join(" · ")}
-                  </p>
+                  <div className="mt-2.5 text-sm">
+                    <span className="font-semibold text-ink">{current.isMega ? "Mega ability" : "Abilities"}</span>
+                    <ul className="mt-1 space-y-1">
+                      {current.abilities.map((a) => (
+                        <li key={a} className="text-ink-soft leading-snug">
+                          <span className="font-semibold text-ink">{a}</span>
+                          {abilities[a] ? ` — ${abilities[a]}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
 
                   <div className="mt-4">
                     {highCoach ? (

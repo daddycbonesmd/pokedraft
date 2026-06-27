@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   loadPokedex,
+  loadAbilities,
   spriteUrl,
   spriteSmall,
   TYPE_COLORS,
@@ -44,6 +45,7 @@ export default function Room({ code }: { code: string }) {
   const router = useRouter();
   const [state, setState] = useState<RoomState | null>(null);
   const [monMap, setMonMap] = useState<Map<number, PokeMon> | null>(null);
+  const [abilities, setAbilities] = useState<Record<string, string>>({});
   const [increment, setIncrement] = useState(1);
   const [error, setError] = useState("");
   const [fatal, setFatal] = useState("");
@@ -68,6 +70,7 @@ export default function Room({ code }: { code: string }) {
       leagueIdRef.current = league.id;
       const dex = await loadPokedex();
       setMonMap(new Map(dex.map((m) => [m.id, m])));
+      loadAbilities().then(setAbilities);
       await refresh();
       const sub = subscribeRoom(league.id, (evt) => {
         // Bids are the high-frequency path — apply them instantly from the payload.
@@ -353,10 +356,17 @@ export default function Room({ code }: { code: string }) {
                       <span key={t} className="chip" style={{ background: TYPE_COLORS[t] ?? "#888" }}>{t}</span>
                     ))}
                   </div>
-                  <p className="mt-2.5 text-sm text-ink-soft">
-                    <span className="font-semibold text-ink">{currentMon.isMega ? "Mega ability:" : "Abilities:"}</span>{" "}
-                    {currentMon.abilities.join(" · ") || "—"}
-                  </p>
+                  <div className="mt-2.5 text-sm">
+                    <span className="font-semibold text-ink">{currentMon.isMega ? "Mega ability" : "Abilities"}</span>
+                    <ul className="mt-1 space-y-1">
+                      {currentMon.abilities.map((a) => (
+                        <li key={a} className="text-ink-soft leading-snug">
+                          <span className="font-semibold text-ink">{a}</span>
+                          {abilities[a] ? ` — ${abilities[a]}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                   <p className="mt-4 text-ink-soft">
                     {highCoach ? (
                       <>High bid <span className="font-display text-2xl font-black" style={{ color: highCoach.color }}>{highBid!.amount}</span> by <b>{highCoach.name}</b></>
