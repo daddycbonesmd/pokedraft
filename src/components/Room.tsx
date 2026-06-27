@@ -40,6 +40,33 @@ function TypeEffect({ types }: { types: string[] }) {
     </div>
   );
 }
+
+type PoolFilterProps = {
+  search: string; setSearch: (v: string) => void; type: string; setType: (v: string) => void;
+  tier: string; setTier: (v: string) => void; ability: string; setAbility: (v: string) => void;
+  types: string[]; tiers: string[]; abilities: string[]; count: number;
+};
+function PoolFilter(p: PoolFilterProps) {
+  return (
+    <div className="paper p-3 mb-3 flex flex-wrap gap-2 items-center text-left">
+      <input value={p.search} onChange={(e) => p.setSearch(e.target.value)} placeholder="Search Pokémon…"
+        className="bg-white/50 rounded px-3 py-1.5 outline-none flex-1 min-w-36" />
+      <select value={p.type} onChange={(e) => p.setType(e.target.value)} className="bg-white/50 rounded px-2 py-1.5 outline-none capitalize">
+        <option value="all">All types</option>
+        {p.types.map((t) => <option key={t} value={t} className="capitalize">{t}</option>)}
+      </select>
+      <select value={p.tier} onChange={(e) => p.setTier(e.target.value)} className="bg-white/50 rounded px-2 py-1.5 outline-none">
+        <option value="all">All tiers</option>
+        {p.tiers.map((t) => <option key={t} value={t}>Tier {t}</option>)}
+      </select>
+      <select value={p.ability} onChange={(e) => p.setAbility(e.target.value)} className="bg-white/50 rounded px-2 py-1.5 outline-none max-w-44">
+        <option value="all">All abilities</option>
+        {p.abilities.map((a) => <option key={a} value={a}>{a}</option>)}
+      </select>
+      <span className="text-xs text-ink-soft">{p.count} shown</span>
+    </div>
+  );
+}
 import {
   getLeagueByCode,
   getRoomState,
@@ -82,6 +109,10 @@ export default function Room({ code }: { code: string }) {
   const [error, setError] = useState("");
   const [fatal, setFatal] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
+  const [pSearch, setPSearch] = useState("");
+  const [pType, setPType] = useState("all");
+  const [pTier, setPTier] = useState("all");
+  const [pAbility, setPAbility] = useState("all");
   const leagueIdRef = useRef<string | null>(null);
   const broadcastRef = useRef<((row: Record<string, unknown>) => void) | null>(null);
 
@@ -169,6 +200,23 @@ export default function Room({ code }: { code: string }) {
   const poolMons = Object.keys(league.pool)
     .map((id) => monMap!.get(Number(id)))
     .filter((m): m is PokeMon => Boolean(m) && !soldIds.has(m!.id));
+
+  // Search/filter for the nomination & pick grids.
+  const poolTypes = [...new Set(poolMons.flatMap((m) => m.types))].sort();
+  const poolTiers = ["S", "A", "B", "C", "D"].filter((t) => poolMons.some((m) => league.pool[m.id] === t));
+  const poolAbilities = [...new Set(poolMons.flatMap((m) => m.abilities))].sort();
+  const filteredPool = poolMons.filter((m) => {
+    if (pSearch && !m.display.toLowerCase().includes(pSearch.toLowerCase())) return false;
+    if (pType !== "all" && !m.types.includes(pType)) return false;
+    if (pTier !== "all" && league.pool[m.id] !== pTier) return false;
+    if (pAbility !== "all" && !m.abilities.includes(pAbility)) return false;
+    return true;
+  });
+  const poolFilterProps = {
+    search: pSearch, setSearch: setPSearch, type: pType, setType: setPType,
+    tier: pTier, setTier: setPTier, ability: pAbility, setAbility: setPAbility,
+    types: poolTypes, tiers: poolTiers, abilities: poolAbilities, count: filteredPool.length,
+  };
 
   // ── Whose turn is it to nominate? Derived from history, so it's race-proof. ──
   const players = coaches; // ordered by join time
@@ -330,8 +378,10 @@ export default function Room({ code }: { code: string }) {
             </>
           )}
           {iPick && !draftDone && (
-            <div className="grid gap-2 grid-cols-3 sm:grid-cols-5 lg:grid-cols-7 mt-4">
-              {poolMons.map((m) => {
+            <div className="mt-4">
+              <PoolFilter {...poolFilterProps} />
+              <div className="grid gap-2 grid-cols-3 sm:grid-cols-5 lg:grid-cols-7">
+              {filteredPool.map((m) => {
                 const v = monValue(m.id);
                 const afford = !me || remaining(me) >= v;
                 return (
@@ -345,6 +395,7 @@ export default function Room({ code }: { code: string }) {
                   </button>
                 );
               })}
+              </div>
             </div>
           )}
           {!iPick && !draftDone && (
@@ -762,8 +813,9 @@ export default function Room({ code }: { code: string }) {
           <h3 className="font-display text-xl font-bold mb-3">
             {mode === "admin" ? "Nominate from your pool" : `${me?.name}, nominate a Pokémon`} ({poolMons.length} left)
           </h3>
+          <PoolFilter {...poolFilterProps} />
           <div className="grid gap-2 grid-cols-3 sm:grid-cols-5 lg:grid-cols-7">
-            {poolMons.map((m) => (
+            {filteredPool.map((m) => (
               <button key={m.id} onClick={() => nominateMon(m.id)}
                 className="paper p-2 text-center hover:-translate-y-0.5 transition" title={m.display}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}

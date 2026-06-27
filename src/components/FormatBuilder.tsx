@@ -26,6 +26,7 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
   const router = useRouter();
   const [dex, setDex] = useState<PokeMon[] | null>(null);
   const [regs, setRegs] = useState<RegData | null>(null);
+  const [hosting, setHosting] = useState(false);
   const [name, setName] = useState("My Format");
   const [ruleset, setRuleset] = useState<{ name: string; gimmick: string } | undefined>(undefined);
   const [tierValues, setTierValues] = useState<Record<string, number>>({ ...DEFAULT_TIER_VALUES });
@@ -42,6 +43,7 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
 
   // Load dex + (optionally) an existing format to edit.
   useEffect(() => {
+    setHosting(!!sessionStorage.getItem("pokedraft.hostDraft"));
     loadPokedex().then(setDex).catch(() => setDex([]));
     loadRegulations().then(setRegs).catch(() => setRegs(null));
     if (editId) {
@@ -127,9 +129,10 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
       {/* Header */}
       <div className="flex flex-wrap items-center gap-3 justify-between mb-5">
         <div>
-          <Link href="/formats" className="text-sm text-ink-soft hover:underline">
-            ← All formats
-          </Link>
+          <div className="flex gap-3">
+            <Link href="/formats" className="text-sm text-ink-soft hover:underline">← All formats</Link>
+            {hosting && <Link href="/host" className="text-sm text-coral font-semibold hover:underline">← Back to hosting</Link>}
+          </div>
           <h1 className="font-display text-3xl font-black mt-1">
             Format <span className="text-coral">builder</span>
           </h1>

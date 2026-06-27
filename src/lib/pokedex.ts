@@ -90,12 +90,12 @@ export const DEFAULT_TIER_VALUES: Record<string, number> = { S: 20, A: 16, B: 12
 export const valueForTier = (tier: string, values?: Record<string, number>) =>
   values?.[tier] ?? DEFAULT_TIER_VALUES[tier] ?? 0;
 
-// A reasonable starting tier based on raw stats — the admin can override per mon.
+// Starting tier from raw stats. S is NEVER auto-assigned — it's reserved for the
+// admin to mark genuinely strong meta Pokémon. Auto-suggest caps at A.
 export function suggestTier(bst: number): Tier {
-  if (bst >= 600) return "S";
-  if (bst >= 535) return "A";
-  if (bst >= 480) return "B";
-  if (bst >= 420) return "C";
+  if (bst >= 570) return "A";
+  if (bst >= 500) return "B";
+  if (bst >= 440) return "C";
   return "D";
 }
 

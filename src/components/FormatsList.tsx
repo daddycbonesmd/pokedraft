@@ -6,8 +6,12 @@ import { loadFormats, deleteFormat, TIER_COLORS, type Format } from "@/lib/poked
 
 export default function FormatsList() {
   const [formats, setFormats] = useState<Format[] | null>(null);
+  const [hosting, setHosting] = useState(false);
 
-  useEffect(() => setFormats(loadFormats()), []);
+  useEffect(() => {
+    setFormats(loadFormats());
+    setHosting(!!sessionStorage.getItem("pokedraft.hostDraft"));
+  }, []);
 
   function remove(id: string) {
     if (!confirm("Delete this format?")) return;
@@ -25,7 +29,10 @@ export default function FormatsList() {
     <main className="max-w-3xl mx-auto px-4 py-8">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <Link href="/" className="text-sm text-ink-soft hover:underline">← Home</Link>
+          <div className="flex gap-3">
+            <Link href="/" className="text-sm text-ink-soft hover:underline">← Home</Link>
+            {hosting && <Link href="/host" className="text-sm text-coral font-semibold hover:underline">← Back to hosting</Link>}
+          </div>
           <h1 className="font-display text-4xl font-black mt-1">
             Your <span className="text-coral">formats</span>
           </h1>

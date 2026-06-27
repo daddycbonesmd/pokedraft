@@ -1,38 +1,46 @@
-// Seeds public/moves.json:
-//   { byMon: { "<monId>": ["Move", ...up to 4...] }, info: { "Move": {t,p,c,d} } }
-// "Notable" = the signature/utility moves that define a Pokémon's niche (disruption,
-// pivoting, hazards, status, priority, setup) — NOT its whole attacking movepool.
-// We intersect each mon's gen9 random-battle movepool with a curated notable list.
+// Seeds public/moves.json: { byMon: { "<monId>": ["Move", ...up to 6...] }, info: {...} }
+// "Notable" is tuned for DOUBLES (VGC): signature moves, priority, spread moves
+// (except Hyper Voice), redirection/speed-control/support, key status & setup.
+// Hazards are intentionally EXCLUDED (irrelevant in doubles).
 // Run: node scripts/fetch-moves.mjs
 import { readFile, writeFile } from "node:fs/promises";
 
-const RANDBATS = "https://raw.githubusercontent.com/pkmn/randbats/main/data/gen9randombattle.json";
+const RANDBATS = "https://raw.githubusercontent.com/pkmn/randbats/main/data/gen9randomdoublesbattle.json";
 const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
-// Ordered by notability — the distinctive utility/disruption moves come first so the
-// top-4 cap favours what actually makes a Pokémon special.
-const NOTABLE = [
-  // signature utility / disruption
-  "Fake Out", "Parting Shot", "Knock Off", "Sucker Punch", "First Impression", "Court Change",
-  "Shed Tail", "Chilly Reception", "Revival Blessing", "Healing Wish", "Lunar Dance", "Destiny Bond",
-  "Final Gambit", "Spore", "Sleep Powder", "Sticky Web", "Strength Sap", "Nuzzle", "Decorate",
-  "Follow Me", "Rage Powder", "Tidy Up", "Mortal Spin", "Pollen Puff", "Coaching",
-  // hazards / control / pivot
-  "Stealth Rock", "Spikes", "Toxic Spikes", "Rapid Spin", "Defog", "U-turn", "Volt Switch",
-  "Flip Turn", "Teleport", "Trick", "Switcheroo", "Encore", "Taunt", "Disable", "Will-O-Wisp",
-  "Thunder Wave", "Glare", "Yawn", "Haze", "Clear Smog", "Dragon Tail", "Circle Throw",
-  "Whirlwind", "Roar", "Perish Song", "Leech Seed", "Pain Split", "Heal Bell", "Aromatherapy",
-  "Wish", "Tailwind", "Aurora Veil", "Trick Room", "Toxic",
-  // priority
-  "Extreme Speed", "Bullet Punch", "Mach Punch", "Aqua Jet", "Ice Shard", "Shadow Sneak",
-  "Grassy Glide", "Jet Punch", "Accelerock", "Water Shuriken", "Vacuum Wave",
-  // setup
-  "Shell Smash", "Dragon Dance", "Quiver Dance", "Nasty Plot", "Swords Dance", "Calm Mind",
-  "Bulk Up", "Belly Drum", "No Retreat", "Victory Dance", "Clangorous Soul", "Tail Glow", "Geomancy",
-  // recovery (lowest priority)
-  "Recover", "Roost", "Slack Off", "Soft-Boiled", "Morning Sun", "Moonlight", "Synthesis", "Shore Up", "Milk Drink",
-];
+// ── Curated doubles categories (priority/spread/signature are auto-detected) ──
+const set = (...xs) => new Set(xs);
+const PREMIUM_SUPPORT = set("Fake Out", "Follow Me", "Rage Powder", "Helping Hand", "Decorate", "Coaching", "Instruct", "Ally Switch");
+const SPEED_CONTROL = set("Tailwind", "Trick Room", "Icy Wind", "Electroweb", "Thunder Wave", "After You", "Nuzzle");
+const DISRUPTION = set("Taunt", "Encore", "Disable", "Haze", "Parting Shot", "Knock Off", "Trick", "Switcheroo", "Imprison", "Quash", "Spite", "Clear Smog", "Roar", "Whirlwind", "Dragon Tail", "Circle Throw", "Foul Play");
+const STATUS = set("Will-O-Wisp", "Spore", "Sleep Powder", "Yawn", "Glare", "Stun Spore", "Toxic", "Poison Powder", "Confuse Ray", "Lovely Kiss", "Sing");
+const PROTECT_SUPPORT = set("Wide Guard", "Quick Guard");
+const SUPPORT = set("Heal Pulse", "Life Dew", "Pollen Puff", "Aromatic Mist", "Gravity", "Beat Up", "Skill Swap", "Trick Room", "Heal Bell", "Aromatherapy", "Snarl", "Struggle Bug");
+const SETUP = set("Dragon Dance", "Swords Dance", "Nasty Plot", "Calm Mind", "Bulk Up", "Shell Smash", "Quiver Dance", "Belly Drum", "Tail Glow", "Geomancy", "Victory Dance", "No Retreat", "Clangorous Soul", "Take Heart", "Acupressure", "Curse", "Coil", "Filet Away", "Fillet Away");
+const SACRIFICE = set("Self-Destruct", "Explosion", "Misty Explosion", "Final Gambit", "Memento", "Healing Wish", "Lunar Dance", "Revival Blessing");
+const RECOVERY = set("Recover", "Roost", "Slack Off", "Soft-Boiled", "Morning Sun", "Moonlight", "Synthesis", "Milk Drink", "Shore Up", "Wish", "Strength Sap", "Jungle Healing");
+// Excluded entirely — singles-only or not draft-notable in doubles.
+const EXCLUDE = set("Stealth Rock", "Spikes", "Toxic Spikes", "Sticky Web", "Rapid Spin", "Defog", "Mortal Spin", "Tidy Up", "Court Change", "Hyper Voice", "Protect", "Detect");
+const SPREAD_TARGETS = new Set(["all-opponents", "all-other-pokemon"]);
+
+function scoreMove(name, d) {
+  if (EXCLUDE.has(name)) return 0;
+  if ((d.lb ?? 99) <= 2) return 100;              // signature / near-signature
+  if (PREMIUM_SUPPORT.has(name)) return 95;
+  if ((d.pr ?? 0) > 0 && d.c !== "status") return 88; // damaging priority
+  if ((d.pr ?? 0) > 0) return 82;                  // status priority (Quick Guard etc.)
+  if (SPEED_CONTROL.has(name)) return 80;
+  if (SPREAD_TARGETS.has(d.tg)) return 70;         // spread move
+  if (DISRUPTION.has(name)) return 66;
+  if (STATUS.has(name)) return 60;
+  if (PROTECT_SUPPORT.has(name)) return 58;
+  if (SUPPORT.has(name)) return 56;
+  if (SACRIFICE.has(name)) return 54;
+  if (SETUP.has(name)) return 48;
+  if (RECOVERY.has(name)) return 38;
+  return 0;
+}
 
 async function getJSON(url, tries = 3) {
   for (let t = 0; t < tries; t++) {
@@ -51,39 +59,66 @@ console.log("Fetching random-battle movepools…");
 const rb = await getJSON(RANDBATS);
 const speciesMoves = {};
 for (const [name, entry] of Object.entries(rb)) {
-  const set = new Set(entry.moves || []);
-  for (const role of Object.values(entry.roles || {})) for (const mv of role.moves || []) set.add(mv);
-  speciesMoves[norm(name)] = set;
+  const s = new Set(entry.moves || []);
+  for (const role of Object.values(entry.roles || {})) for (const mv of role.moves || []) s.add(mv);
+  speciesMoves[norm(name)] = s;
 }
 
-const notableFor = (have) => NOTABLE.filter((mv) => have.has(mv)).slice(0, 4);
+// PokéAPI form name (normalized) → Showdown species key, for forms that differ.
+const FORM_KEY = {
+  taurospaldeacombatbreed: "taurospaldeacombat", taurospaldeablazebreed: "taurospaldeablaze", taurospaldeaaquabreed: "taurospaldeaaqua",
+  basculegionmale: "basculegion", basculegionfemale: "basculegionf", meowsticmale: "meowstic", meowsticfemale: "meowsticf",
+  aegislashshield: "aegislash", gourgeistaverage: "gourgeist", lycanrocmidday: "lycanroc", mimikyudisguised: "mimikyu",
+  morpekofullbelly: "morpeko", palafinzero: "palafin", mausholdfamilyoffour: "maushold",
+  tornadusincarnate: "tornadus", thundurusincarnate: "thundurus", landorusincarnate: "landorus", enamorusincarnate: "enamorus",
+  indeedeemale: "indeedee", indeedeefemale: "indeedeef", urshifusinglestrike: "urshifu", urshifurapidstrike: "urshifurapidstrike",
+  oricoriobaile: "oricorio", toxtricityamped: "toxtricity", eiscueice: "eiscue", wishiwashisolo: "wishiwashi",
+  oinkolognemale: "oinkologne", oinkolognefemale: "oinkolognef", keldeoordinary: "keldeo", zygarde50: "zygarde",
+};
+const movesFor = (n) => speciesMoves[n] ?? speciesMoves[FORM_KEY[n] ?? ""];
 
 const myDex = JSON.parse(await readFile(new URL("../public/pokedex.json", import.meta.url)));
 const baseName = new Map(myDex.map((m) => [m.id, m.name]));
-const byMon = {};
+const monMoves = new Map(); // monId → Set of moves
 const allMoves = new Set();
 for (const m of myDex) {
-  let have = speciesMoves[norm(m.name)];
-  if (!have && m.isMega) have = speciesMoves[norm(baseName.get(m.baseId) || "")];
+  let have = movesFor(norm(m.name));
+  if (!have && m.isMega) have = movesFor(norm(baseName.get(m.baseId) || ""));
   if (!have) continue;
-  const notable = notableFor(have);
-  if (notable.length) { byMon[m.id] = notable; notable.forEach((x) => allMoves.add(x)); }
+  monMoves.set(m.id, have);
+  have.forEach((x) => allMoves.add(x));
 }
-console.log(`${Object.keys(byMon).length} Pokémon with notable moves, ${allMoves.size} unique moves.`);
 
+console.log(`Fetching details for ${allMoves.size} moves…`);
 let done = 0;
 const moveList = [...allMoves];
-const infoPairs = await pool(moveList, 20, async (mv) => {
+const detailPairs = await pool(moveList, 20, async (mv) => {
   try {
     const d = await getJSON(`https://pokeapi.co/api/v2/move/${slug(mv)}`);
     const en = (d.effect_entries || []).find((e) => e.language.name === "en");
     let desc = (en?.short_effect || "").replace(/\s+/g, " ").trim();
     if (d.effect_chance != null) desc = desc.replace(/\$effect_chance/g, String(d.effect_chance));
-    if (++done % 50 === 0) console.log(`  …${done}/${moveList.length}`);
-    return [mv, { t: d.type?.name ?? "", p: d.power ?? null, c: d.damage_class?.name ?? "", d: desc }];
-  } catch { return [mv, { t: "", p: null, c: "", d: "" }]; }
+    if (++done % 100 === 0) console.log(`  …${done}/${moveList.length}`);
+    return [mv, { t: d.type?.name ?? "", p: d.power ?? null, c: d.damage_class?.name ?? "",
+      d: desc, pr: d.priority ?? 0, tg: d.target?.name ?? "", lb: (d.learned_by_pokemon || []).length }];
+  } catch { return [mv, { t: "", p: null, c: "", d: "", pr: 0, tg: "", lb: 99 }]; }
 });
-const info = Object.fromEntries(infoPairs);
+const detail = Object.fromEntries(detailPairs);
+
+const byMon = {};
+const usedMoves = new Set();
+for (const [id, moves] of monMoves) {
+  const scored = [...moves]
+    .map((mv) => ({ mv, s: scoreMove(mv, detail[mv] || {}) }))
+    .filter((x) => x.s > 0)
+    .sort((a, b) => b.s - a.s || a.mv.localeCompare(b.mv))
+    .slice(0, 6)
+    .map((x) => x.mv);
+  if (scored.length) { byMon[id] = scored; scored.forEach((mv) => usedMoves.add(mv)); }
+}
+
+const info = {};
+for (const mv of usedMoves) { const d = detail[mv]; info[mv] = { t: d.t, p: d.p, c: d.c, d: d.d }; }
 
 await writeFile(new URL("../public/moves.json", import.meta.url), JSON.stringify({ byMon, info }));
 console.log(`\nWrote moves.json (${Object.keys(byMon).length} mons, ${Object.keys(info).length} moves)`);
