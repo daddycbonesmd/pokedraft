@@ -21,6 +21,8 @@ export default function Home() {
           </Link>
         </div>
         <div className="mt-4 flex gap-4 justify-center text-sm">
+          <Link href="/leagues" className="text-ink-soft hover:underline">My leagues</Link>
+          <span className="text-ink-soft/50">·</span>
           <Link href="/formats" className="text-ink-soft hover:underline">Build a format</Link>
           <span className="text-ink-soft/50">·</span>
           <Link href="/demo" className="text-ink-soft hover:underline">See the demo</Link>

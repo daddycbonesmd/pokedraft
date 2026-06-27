@@ -70,6 +70,20 @@ export function getIdentity(code: string): Identity | null {
   }
 }
 
+const ID_PREFIX = "pokedraft.room.";
+export function myLeagueCodes(): string[] {
+  if (typeof window === "undefined") return [];
+  const out: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith(ID_PREFIX)) out.push(k.slice(ID_PREFIX.length));
+  }
+  return out;
+}
+export function forgetLeague(code: string) {
+  localStorage.removeItem(idKey(code));
+}
+
 function makeCode() {
   const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ"; // no I/O to avoid confusion
   let s = "";
@@ -125,6 +139,12 @@ export async function createLeague(opts: {
 export async function getLeagueByCode(code: string): Promise<League | null> {
   const { data } = await supabase.from("leagues").select().eq("code", code.toUpperCase()).maybeSingle();
   return data;
+}
+
+export async function getLeaguesByCodes(codes: string[]): Promise<League[]> {
+  if (!codes.length) return [];
+  const { data } = await supabase.from("leagues").select().in("code", codes.map((c) => c.toUpperCase()));
+  return data ?? [];
 }
 
 export async function joinLeague(code: string, name: string): Promise<{ league: League; coach: Coach }> {
