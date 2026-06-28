@@ -56,10 +56,11 @@ async function loadJSON<T>(path: string, fallback: T): Promise<T> {
   try { const r = await fetch(path); return r.ok ? await r.json() : fallback; }
   catch { return fallback; }
 }
+export type ItemInfo = { name: string; desc: string; cat: string };
 export const loadRoles = () => loadJSON<Record<string, RoleSet[]>>("/roles.json", {});
 export const loadMovepools = () => loadJSON<Record<string, string[]>>("/movepools.json", {});
 export const loadSpecies = () => loadJSON<Record<string, string>>("/species.json", {});
-export const loadItems = () => loadJSON<string[]>("/items.json", []);
+export const loadItems = () => loadJSON<ItemInfo[]>("/items.json", []);
 
 export function emptySet(monId: number, species: string, abilities: string[]): BattleSet {
   return {

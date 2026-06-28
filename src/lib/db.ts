@@ -16,6 +16,7 @@ export type League = {
   status: string;
   ruleset: string; // e.g. "VGC 2025 Reg I · Tera" — shown in the room
   battle_format: BattleFormat; // singles or doubles — drives the battle engine
+  legal_items: string[] | null; // allowed held items (names); null = all legal
   created_at: string;
 };
 
@@ -116,6 +117,7 @@ export async function createLeague(opts: {
   tierValues?: Record<string, number>;
   teamSize?: number;
   battleFormat?: BattleFormat;
+  legalItems?: string[] | null;
 }): Promise<{ league: League; coach: Coach }> {
   const code = makeCode();
   const admin_token = crypto.randomUUID();
@@ -133,11 +135,11 @@ export async function createLeague(opts: {
   };
   let { data: league, error } = await supabase
     .from("leagues")
-    .insert({ ...base, battle_format: opts.battleFormat ?? "doubles" })
+    .insert({ ...base, battle_format: opts.battleFormat ?? "doubles", legal_items: opts.legalItems ?? null })
     .select()
     .single();
-  // Tolerate the battle_format migration not being applied yet.
-  if (error && /battle_format|column/i.test(error.message ?? "")) {
+  // Tolerate the newer columns not being migrated yet.
+  if (error && /battle_format|legal_items|column/i.test(error.message ?? "")) {
     ({ data: league, error } = await supabase.from("leagues").insert(base).select().single());
   }
   if (error) throw error;

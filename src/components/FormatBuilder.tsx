@@ -19,6 +19,7 @@ import {
   type PokeMon,
 } from "@/lib/pokedex";
 import { loadRegulations, poolFromRegulation, type RegData, type Regulation } from "@/lib/regulations";
+import { loadItems, type ItemInfo } from "@/lib/teambuilder";
 
 const MAX_VISIBLE = 300; // keep the DOM light; filters narrow things down
 
@@ -41,11 +42,24 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
   const [onlyPicked, setOnlyPicked] = useState(false);
   const [sort, setSort] = useState<"dex" | "tier">("dex");
 
+  // Legal-items menu
+  const [itemData, setItemData] = useState<ItemInfo[]>([]);
+  const [legalItems, setLegalItems] = useState<Set<string>>(new Set());
+  const [showItems, setShowItems] = useState(false);
+  const [itemSearch, setItemSearch] = useState("");
+  const [itemCat, setItemCat] = useState<string>("all");
+  const [itemSort, setItemSort] = useState<"name" | "cat">("name");
+
   // Load dex + (optionally) an existing format to edit.
   useEffect(() => {
     setHosting(!!sessionStorage.getItem("pokedraft.hostDraft"));
     loadPokedex().then(setDex).catch(() => setDex([]));
     loadRegulations().then(setRegs).catch(() => setRegs(null));
+    loadItems().then((data) => {
+      setItemData(data);
+      const f = editId ? getFormat(editId) : null;
+      setLegalItems(f?.items ? new Set(f.items) : new Set(data.map((i) => i.name)));
+    }).catch(() => setItemData([]));
     if (editId) {
       const f = getFormat(editId);
       if (f) {
@@ -88,6 +102,22 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
   const visible = sorted.slice(0, MAX_VISIBLE);
   const pickedCount = Object.keys(picked).length;
 
+  const itemCats = useMemo(() => ["all", ...Array.from(new Set(itemData.map((i) => i.cat)))], [itemData]);
+  const filteredItems = useMemo(() => {
+    const q = itemSearch.trim().toLowerCase();
+    const list = itemData.filter((i) =>
+      (itemCat === "all" || i.cat === itemCat) &&
+      (!q || i.name.toLowerCase().includes(q) || i.desc.toLowerCase().includes(q)));
+    return itemSort === "cat" ? [...list].sort((a, b) => a.cat.localeCompare(b.cat) || a.name.localeCompare(b.name)) : list;
+  }, [itemData, itemSearch, itemCat, itemSort]);
+
+  const toggleItem = (name: string) => setLegalItems((s) => {
+    const n = new Set(s); if (n.has(name)) n.delete(name); else n.add(name); return n;
+  });
+  const setShownItems = (include: boolean) => setLegalItems((s) => {
+    const n = new Set(s); for (const i of filteredItems) include ? n.add(i.name) : n.delete(i.name); return n;
+  });
+
   function toggle(m: PokeMon) {
     setPicked((p) => {
       const next = { ...p };
@@ -118,6 +148,7 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
       includedIds: Object.keys(picked).map(Number),
       tiers: picked,
       tierValues,
+      items: itemData.length && legalItems.size === itemData.length ? undefined : [...legalItems],
       updatedAt: Date.now(),
       ruleset,
     });
@@ -193,6 +224,59 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
             </label>
           ))}
         </div>
+      </div>
+
+      {/* Legal items */}
+      <div className="paper p-4 mb-4">
+        <button className="flex items-center justify-between w-full" onClick={() => setShowItems((v) => !v)}>
+          <span className="text-sm font-semibold text-ink-soft">
+            Legal items — <span className="text-coral font-bold">{legalItems.size}</span> of {itemData.length} allowed
+          </span>
+          <span className="text-ink-soft text-xs">{showItems ? "▲ hide" : "▼ edit"}</span>
+        </button>
+        {showItems && (
+          <div className="mt-3">
+            <div className="flex flex-wrap gap-2 items-center mb-2">
+              <input
+                value={itemSearch}
+                onChange={(e) => setItemSearch(e.target.value)}
+                placeholder="Search items…"
+                className="flex-1 min-w-40 bg-white/50 rounded px-3 py-2 outline-none focus:ring-2 focus:ring-coral/40"
+              />
+              <select value={itemCat} onChange={(e) => setItemCat(e.target.value)} className="bg-white/50 rounded px-2 py-2 outline-none">
+                {itemCats.map((c) => <option key={c} value={c}>{c === "all" ? "All categories" : c}</option>)}
+              </select>
+              <select value={itemSort} onChange={(e) => setItemSort(e.target.value as "name" | "cat")} className="bg-white/50 rounded px-2 py-2 outline-none">
+                <option value="name">Sort: Name</option>
+                <option value="cat">Sort: Category</option>
+              </select>
+            </div>
+            <div className="flex flex-wrap gap-2 mb-2 items-center">
+              <button className="btn btn-ghost text-sm py-1" onClick={() => setLegalItems(new Set(itemData.map((i) => i.name)))}>All</button>
+              <button className="btn btn-ghost text-sm py-1" onClick={() => setLegalItems(new Set())}>None</button>
+              <button className="btn btn-ghost text-sm py-1" onClick={() => setShownItems(true)}>+ Shown</button>
+              <button className="btn btn-ghost text-sm py-1" onClick={() => setShownItems(false)}>− Shown</button>
+              <span className="text-xs text-ink-soft">{filteredItems.length} shown</span>
+            </div>
+            <div className="max-h-72 overflow-auto grid sm:grid-cols-2 gap-1 pr-1">
+              {filteredItems.slice(0, 400).map((i) => {
+                const on = legalItems.has(i.name);
+                return (
+                  <button key={i.name} onClick={() => toggleItem(i.name)} title={i.desc}
+                    className="text-left rounded px-2 py-1.5 flex items-start gap-2 transition"
+                    style={{ background: on ? "rgba(47,143,131,0.12)" : "rgba(0,0,0,0.03)" }}>
+                    <span className="mt-0.5 w-4 h-4 shrink-0 rounded-sm grid place-items-center text-[10px] text-white"
+                      style={{ background: on ? "var(--teal)" : "transparent", border: `1px solid ${on ? "var(--teal)" : "var(--paper-edge)"}` }}>{on ? "✓" : ""}</span>
+                    <span className="min-w-0">
+                      <span className="text-sm font-semibold">{i.name}</span> <span className="text-[10px] text-ink-soft">{i.cat}</span>
+                      <span className="block text-[11px] text-ink-soft truncate">{i.desc}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Toolbar */}

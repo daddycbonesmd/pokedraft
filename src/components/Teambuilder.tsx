@@ -10,7 +10,7 @@ import {
   STATS, STAT_LABEL, EV_TOTAL_MAX, EV_STAT_MAX, NATURES, natureLabel, TERA_TYPES,
   loadRoles, loadMovepools, loadSpecies, loadItems,
   emptySet, setFromRole, setReady, evTotal, teamToShowdown,
-  type BattleSet, type RoleSet, type Stat,
+  type BattleSet, type RoleSet, type Stat, type ItemInfo,
 } from "@/lib/teambuilder";
 
 export default function Teambuilder({ code }: { code: string }) {
@@ -20,7 +20,8 @@ export default function Teambuilder({ code }: { code: string }) {
   const [sets, setSets] = useState<Record<number, BattleSet>>({});
   const [roles, setRoles] = useState<Record<string, RoleSet[]>>({});
   const [movepools, setMovepools] = useState<Record<string, string[]>>({});
-  const [items, setItems] = useState<string[]>([]);
+  const [items, setItems] = useState<ItemInfo[]>([]);
+  const [legalItems, setLegalItems] = useState<Set<string> | null>(null);
   const [battleFormat, setBattleFormat] = useState<string>("doubles");
   const [fatal, setFatal] = useState("");
   const [saved, setSaved] = useState<"idle" | "saving" | "ok">("idle");
@@ -40,6 +41,7 @@ export default function Teambuilder({ code }: { code: string }) {
       if (!me) { setFatal("You're not a coach in this league."); return; }
       setCoachId(me.id);
       setBattleFormat(league.battle_format ?? "doubles");
+      setLegalItems(league.legal_items ? new Set(league.legal_items) : null);
       setRoles(r); setMovepools(mp); setItems(it);
 
       const monMap = new Map(dex.map((m) => [m.id, m]));
@@ -108,6 +110,7 @@ export default function Teambuilder({ code }: { code: string }) {
   if (!mons) return <Centered><span className="hand text-3xl text-coral">loading your team…</span></Centered>;
 
   const readyCount = setsList.filter(setReady).length;
+  const itemOptions = legalItems ? items.filter((i) => legalItems.has(i.name)) : items;
 
   return (
     <main className="max-w-3xl mx-auto px-4 py-8">
@@ -136,7 +139,7 @@ export default function Teambuilder({ code }: { code: string }) {
         {mons.map((m) => (
           <SetEditor
             key={m.id} mon={m} set={sets[m.id]}
-            roles={roles[m.id] ?? []} movepool={movepools[m.id] ?? []} items={items}
+            roles={roles[m.id] ?? []} movepool={movepools[m.id] ?? []} items={itemOptions}
             onApplyRole={(role) => update(m.id, setFromRole(m.id, sets[m.id].species, role))}
             onField={(patch) => update(m.id, patch)}
             onMove={(i, v) => setMove(m.id, i, v)}
@@ -152,7 +155,7 @@ export default function Teambuilder({ code }: { code: string }) {
 function SetEditor({
   mon, set, roles, movepool, items, onApplyRole, onField, onMove, onEv, onIv,
 }: {
-  mon: PokeMon; set: BattleSet; roles: RoleSet[]; movepool: string[]; items: string[];
+  mon: PokeMon; set: BattleSet; roles: RoleSet[]; movepool: string[]; items: ItemInfo[];
   onApplyRole: (r: RoleSet) => void;
   onField: (patch: Partial<BattleSet>) => void;
   onMove: (i: number, v: string) => void;
@@ -221,7 +224,7 @@ function SetEditor({
           </div>
           <div>
             <Label>Item</Label>
-            <datalist id={itemListId}>{items.map((it) => <option key={it} value={it} />)}</datalist>
+            <datalist id={itemListId}>{items.map((it) => <option key={it.name} value={it.name}>{it.cat}</option>)}</datalist>
             <input list={itemListId} className="tb-input" value={set.item} placeholder="None"
               onChange={(e) => onField({ item: e.target.value })} />
           </div>

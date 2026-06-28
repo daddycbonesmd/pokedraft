@@ -92,6 +92,7 @@ export default function HostLeague() {
         tierValues: fmt.tierValues,
         teamSize,
         battleFormat,
+        legalItems: fmt.items ?? null,
       });
       sessionStorage.removeItem("pokedraft.hostDraft");
       router.push(`/room/${league.code}`);

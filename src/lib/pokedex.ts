@@ -128,6 +128,7 @@ export type Format = {
   includedIds: number[];
   tiers: Record<number, string>; // monId → tier label
   tierValues?: Record<string, number>; // tier → draft point value
+  items?: string[]; // legal held items (names). undefined = all items legal
   updatedAt: number;
   ruleset?: { name: string; gimmick: string }; // set when started from a regulation preset
 };

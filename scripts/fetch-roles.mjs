@@ -141,10 +141,19 @@ for (const m of dex) speciesOut[m.id] = showdownSpecies(m);
 await writeFile(new URL("../public/species.json", import.meta.url), JSON.stringify(speciesOut));
 console.log(`Wrote species.json (${Object.keys(speciesOut).length} mons)`);
 
-// ── items.json (all battle item names, for the item picker) ──
+// ── items.json (battle items with category + description, for the item menus) ──
+function itemCategory(i) {
+  if (i.isBerry) return "Berry";
+  if (i.megaStone) return "Mega Stone";
+  if (i.isGem) return "Gem";
+  if (i.onPlate || /(Plate|Memory|Drive)$/.test(i.name)) return "Type";
+  if (/^Choice /.test(i.name)) return "Choice";
+  if (i.isPokeball) return "Poké Ball";
+  return "Held item";
+}
 const itemsOut = Dex.items.all()
-  .filter((i) => i.exists && i.name && !i.isNonstandard)
-  .map((i) => i.name)
-  .sort();
+  .filter((i) => i.exists && i.name && !i.isNonstandard && !i.isPokeball)
+  .map((i) => ({ name: i.name, desc: (i.shortDesc || i.desc || "").replace(/\s+/g, " ").trim(), cat: itemCategory(i) }))
+  .sort((a, b) => a.name.localeCompare(b.name));
 await writeFile(new URL("../public/items.json", import.meta.url), JSON.stringify(itemsOut));
 console.log(`Wrote items.json (${itemsOut.length} items)`);
