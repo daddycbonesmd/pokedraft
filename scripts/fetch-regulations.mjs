@@ -104,8 +104,15 @@ for (const tg of TARGETS) {
   presets.push(preset);
 }
 
+// Legal held items per reg. Mega regs allow Mega Stones on top of standard items;
+// Tera/gen-9 regs omit `items` and fall back to all standard (non-Mega) items.
+const allItemNames = JSON.parse(await readFile(new URL("../public/items.json", import.meta.url))).map((i) => i.name);
+for (const p of presets) {
+  if (p.gimmick === "Mega") p.items = allItemNames;
+}
+
 const out = {
-  note: "Seeded from Pokémon Showdown. Mega regs (M-A/M-B) carry explicit legalIds from their mod.",
+  note: "Seeded from Pokémon Showdown. Mega regs (M-A/M-B) carry explicit legalIds + Mega-Stone-inclusive item lists from their mod.",
   svLegalNums: [...svLegal].sort((a, b) => a - b),
   restrictedNums: [...restricted].sort((a, b) => a - b),
   mythicalNums: [...mythical].sort((a, b) => a - b),

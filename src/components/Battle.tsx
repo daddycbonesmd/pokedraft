@@ -59,10 +59,11 @@ export default function Battle({ id }: { id: string }) {
       if (cancelled) return;
       setBattle(b); setChoices(ch); setSnap(s); setPending({});
 
-      // Auto-resolve team preview (keep drafted order) so v1 jumps straight to battling.
-      if ((viewer === "p1" || viewer === "p2") && s.request?.teamPreview) {
-        const seq = ch.filter((c) => c.side === viewer).length;
-        await submitChoice(id, viewer, seq, "default");
+      // Auto-resolve team preview (keep drafted order) so v1 jumps straight to
+      // battling. Team preview is always this side's first choice (seq 0) — only
+      // submit when we have none yet, so realtime re-renders don't spam choices.
+      if ((viewer === "p1" || viewer === "p2") && s.request?.teamPreview && ch.filter((c) => c.side === viewer).length === 0) {
+        await submitChoice(id, viewer, 0, "default");
       }
       // Any client persists the result once.
       if (s.ended && b.status === "active") await finishBattle(id, s.winner);

@@ -10,6 +10,7 @@ export type Regulation = {
   blurb: string;
   source: string;
   legalIds?: number[]; // Mega regs (M-A/M-B): the exact legal roster from the format's mod
+  items?: string[]; // legal held items; omitted = all standard (non-Mega) items
 };
 
 export type RegData = {

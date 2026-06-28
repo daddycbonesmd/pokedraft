@@ -58,7 +58,9 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
     loadItems().then((data) => {
       setItemData(data);
       const f = editId ? getFormat(editId) : null;
-      setLegalItems(f?.items ? new Set(f.items) : new Set(data.map((i) => i.name)));
+      // Default legal set = all standard (non-Mega) items; Mega Stones are opt-in.
+      const standard = new Set(data.filter((i) => i.cat !== "Mega Stone").map((i) => i.name));
+      setLegalItems(f?.items ? new Set(f.items) : standard);
     }).catch(() => setItemData([]));
     if (editId) {
       const f = getFormat(editId);
@@ -76,6 +78,8 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
     setPicked(poolFromRegulation(dex, reg, regs));
     setName(reg.name);
     setRuleset({ name: reg.name, gimmick: reg.gimmick });
+    // Mega regs allow Mega Stones; Tera regs use the standard (non-Mega) set.
+    setLegalItems(reg.items ? new Set(reg.items) : new Set(itemData.filter((i) => i.cat !== "Mega Stone").map((i) => i.name)));
   }
 
   const filtered = useMemo(() => {
@@ -103,6 +107,8 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
   const pickedCount = Object.keys(picked).length;
 
   const itemCats = useMemo(() => ["all", ...Array.from(new Set(itemData.map((i) => i.cat)))], [itemData]);
+  const standardNames = useMemo(() => itemData.filter((i) => i.cat !== "Mega Stone").map((i) => i.name), [itemData]);
+  const isStandardItemSet = legalItems.size === standardNames.length && standardNames.every((n) => legalItems.has(n));
   const filteredItems = useMemo(() => {
     const q = itemSearch.trim().toLowerCase();
     const list = itemData.filter((i) =>
@@ -148,7 +154,7 @@ export default function FormatBuilder({ editId }: { editId?: string }) {
       includedIds: Object.keys(picked).map(Number),
       tiers: picked,
       tierValues,
-      items: itemData.length && legalItems.size === itemData.length ? undefined : [...legalItems],
+      items: itemData.length && isStandardItemSet ? undefined : [...legalItems],
       updatedAt: Date.now(),
       ruleset,
     });

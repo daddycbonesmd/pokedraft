@@ -110,7 +110,8 @@ export default function Teambuilder({ code }: { code: string }) {
   if (!mons) return <Centered><span className="hand text-3xl text-coral">loading your team…</span></Centered>;
 
   const readyCount = setsList.filter(setReady).length;
-  const itemOptions = legalItems ? items.filter((i) => legalItems.has(i.name)) : items;
+  // No explicit list = all standard items (Mega Stones are opt-in via the format).
+  const itemOptions = legalItems ? items.filter((i) => legalItems.has(i.name)) : items.filter((i) => i.cat !== "Mega Stone");
 
   return (
     <main className="max-w-3xl mx-auto px-4 py-8">
