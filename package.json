@@ -11,6 +11,7 @@
   "dependencies": {
     "@pkmn/data": "^0.10.11",
     "@pkmn/dex": "^0.10.11",
+    "@pkmn/img": "^0.3.4",
     "@pkmn/sets": "^5.2.0",
     "@pkmn/sim": "^0.10.11",
     "@supabase/supabase-js": "^2.108.2",

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { loadPokedex, spriteSmall } from "@/lib/pokedex";
+import { Sprites } from "@pkmn/img";
 import {
   engineFormat, getBattle, getBattleChoices, getLeagueById, getIdentity,
   subscribeBattle, submitChoice, finishBattle,
@@ -12,7 +12,6 @@ import {
   setupCommands, replay, needsChoice, type BattleSnapshot, type Viewer, type Request, type Slot,
 } from "@/lib/battle";
 
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 const NEED_TARGET = new Set(["normal", "any", "adjacentFoe"]);
 type SlotChoice = { kind: "move"; index: number; moveTarget: string } | { kind: "switch"; index: number };
 
@@ -25,7 +24,6 @@ export default function Battle({ id }: { id: string }) {
   const [gimmick, setGimmick] = useState<Record<number, "mega" | "terastallize">>({});
   const [fatal, setFatal] = useState("");
   const [code, setCode] = useState("");
-  const nameToId = useRef<Map<string, number>>(new Map());
 
   // Initial load: identify the viewer + sprite map.
   useEffect(() => {
@@ -37,10 +35,6 @@ export default function Battle({ id }: { id: string }) {
       setCode(c);
       const identity = c ? getIdentity(c) : null;
       setViewer(identity?.coachId === b.p1_coach_id ? "p1" : identity?.coachId === b.p2_coach_id ? "p2" : "spectator");
-      const dex = await loadPokedex();
-      const map = new Map<string, number>();
-      for (const m of dex) { map.set(norm(m.display), m.id); map.set(norm(m.name), m.id); }
-      nameToId.current = map;
       setBattle(b);
     })();
   }, [id]);
@@ -128,11 +122,19 @@ export default function Battle({ id }: { id: string }) {
         <Link href={code ? `/play/${code}` : "/"} className="btn btn-ghost text-sm py-2">← Battles</Link>
       </div>
 
-      {/* Field — opponent on top, you below */}
-      <div className="paper p-4 space-y-4">
-        <SideRow side={snap.far} nameToId={nameToId.current} align="right" />
-        <div className="border-t border-dashed border-paper-edge" />
-        <SideRow side={snap.near} nameToId={nameToId.current} align="left" />
+      {/* Field — opponent up-right, you down-left (Showdown layout) */}
+      <div className="relative rounded-xl overflow-hidden shadow-inner"
+        style={{ height: 300, background: "linear-gradient(#add8ee 0%, #c4e3f2 50%, #cfe8a6 50%, #aed98c 100%)" }}>
+        {/* far side */}
+        <div className="absolute top-3 right-4"><HpPlate side={snap.far} align="right" /></div>
+        <div className="absolute top-10 right-6 flex gap-3 items-end">
+          {(snap.far.active.filter(Boolean) as NonNullable<Slot>[]).map((m, i) => <BattleMon key={`far-${i}`} mon={m} facing="front" />)}
+        </div>
+        {/* near side */}
+        <div className="absolute bottom-3 left-4"><HpPlate side={snap.near} align="left" /></div>
+        <div className="absolute bottom-8 left-6 flex gap-3 items-end">
+          {(snap.near.active.filter(Boolean) as NonNullable<Slot>[]).map((m, i) => <BattleMon key={`near-${i}`} mon={m} facing="back" />)}
+        </div>
       </div>
 
       {/* Status / choices */}
@@ -176,32 +178,61 @@ export default function Battle({ id }: { id: string }) {
   );
 }
 
-function SideRow({ side, nameToId, align }: { side: { name: string; active: Slot[] }; nameToId: Map<string, number>; align: "left" | "right" }) {
-  const mons = side.active.filter(Boolean) as NonNullable<Slot>[];
+const hpColor = (p: number) => (p > 50 ? "#3fa84b" : p > 20 ? "#dca23e" : "#d9594c");
+
+function BattleMon({ mon, facing }: { mon: NonNullable<Slot>; facing: "front" | "back" }) {
+  const url = useMemo(
+    () => (Sprites.getPokemon(mon.species, { gen: "ani", side: facing === "front" ? "p2" : "p1" }) as { url: string }).url,
+    [mon.species, facing],
+  );
+  const prevHp = useRef(mon.hpPct);
+  const [hit, setHit] = useState(false);
+  useEffect(() => {
+    if (mon.hpPct < prevHp.current && !mon.fainted) {
+      setHit(true);
+      const t = setTimeout(() => setHit(false), 450);
+      prevHp.current = mon.hpPct;
+      return () => clearTimeout(t);
+    }
+    prevHp.current = mon.hpPct;
+  }, [mon.hpPct, mon.fainted]);
+
   return (
-    <div className={align === "right" ? "text-right" : ""}>
-      <div className="text-xs font-semibold text-ink-soft mb-1">{side.name}</div>
-      <div className={`flex gap-3 ${align === "right" ? "justify-end" : ""}`}>
-        {mons.length === 0 && <span className="text-ink-soft text-sm italic">—</span>}
-        {mons.map((m, i) => {
-          const monId = nameToId.get(norm(m.species));
-          return (
-            <div key={i} className={`flex items-center gap-2 ${align === "right" ? "flex-row-reverse" : ""}`} style={{ opacity: m.fainted ? 0.4 : 1 }}>
-              {monId ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={spriteSmall(monId)} alt={m.species} width={44} height={44} />
-              ) : <span className="w-11 h-11 grid place-items-center text-xs">?</span>}
-              <div className={align === "right" ? "text-right" : ""}>
-                <div className="text-sm font-semibold leading-tight">{m.species}{m.status && <span className="ml-1 text-[10px] uppercase text-coral">{m.status}</span>}</div>
-                <div className="w-24 h-2 rounded bg-black/10 mt-0.5 inline-block">
-                  <div className="h-full rounded" style={{ width: `${m.hpPct}%`, background: m.hpPct > 50 ? "#2f8f83" : m.hpPct > 20 ? "#dca23e" : "#d9594c" }} />
-                </div>
-                <div className="text-[10px] text-ink-soft">{m.fainted ? "fainted" : `${m.hpPct}%`}</div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+    <div style={{ width: 96, height: 100 }} className="grid place-items-end justify-center">
+      {/* key by species → a switch or Mega Evolution remounts and replays the entrance */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img key={mon.species} src={url} alt={mon.species} draggable={false}
+        className={`bm ${mon.fainted ? "bm-faint" : "bm-in"} ${hit ? "bm-hit" : ""}`} />
+      <style jsx>{`
+        .bm { image-rendering: pixelated; max-height: 100px; max-width: 112px; transform-origin: bottom center; }
+        .bm-in { animation: bmIn 0.45s ease-out; }
+        .bm-hit { animation: bmHit 0.45s ease-in-out; }
+        .bm-faint { animation: bmFaint 0.6s ease-in forwards; }
+        @keyframes bmIn { from { opacity: 0; transform: translateY(-14px) scale(0.7); } to { opacity: 1; transform: none; } }
+        @keyframes bmHit { 0%,100% { transform: translateX(0); filter: none; } 25% { transform: translateX(-6px); filter: brightness(2.2); } 50% { transform: translateX(6px); } 75% { transform: translateX(-4px); } }
+        @keyframes bmFaint { to { opacity: 0; transform: translateY(24px) scale(0.85); } }
+      `}</style>
+    </div>
+  );
+}
+
+function HpPlate({ side, align }: { side: { name: string; active: Slot[] }; align: "left" | "right" }) {
+  const mons = side.active.filter(Boolean) as NonNullable<Slot>[];
+  if (!mons.length) return null;
+  return (
+    <div className={`bg-white/85 rounded-lg px-2.5 py-1.5 shadow ${align === "right" ? "text-right" : ""}`} style={{ minWidth: 156 }}>
+      <div className="text-[11px] font-bold text-ink-soft mb-0.5">{side.name}</div>
+      {mons.map((m, i) => (
+        <div key={i} className="mb-1 last:mb-0">
+          <div className="flex items-center gap-1 justify-between">
+            <span className="text-xs font-semibold truncate">{m.species}{m.status && <span className="ml-1 text-[9px] uppercase text-coral">{m.status}</span>}</span>
+            <span className="text-[10px] text-ink-soft">{m.fainted ? "fnt" : `${m.hpPct}%`}</span>
+          </div>
+          <div className="h-2 rounded bg-black/10 overflow-hidden">
+            <div className="h-full rounded" style={{ width: `${m.hpPct}%`, background: hpColor(m.hpPct), transition: "width 0.6s ease" }} />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
