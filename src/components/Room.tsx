@@ -68,6 +68,19 @@ function PoolFilter(p: PoolFilterProps) {
   );
 }
 
+function AdminTeamSize({ size, onChange }: { size: number; onChange: (delta: number) => void }) {
+  return (
+    <div className="paper flex items-center gap-1 px-2 py-1 text-sm" title="Pokémon per team (host only)">
+      <span className="text-ink-soft font-semibold">Team</span>
+      <button className="w-6 h-6 leading-none font-bold rounded hover:bg-black/5 disabled:opacity-30"
+        onClick={() => onChange(-1)} disabled={size <= 1} aria-label="Smaller teams">−</button>
+      <span className="w-5 text-center font-bold tabular-nums">{size}</span>
+      <button className="w-6 h-6 leading-none font-bold rounded hover:bg-black/5 disabled:opacity-30"
+        onClick={() => onChange(1)} disabled={size >= 30} aria-label="Bigger teams">+</button>
+    </div>
+  );
+}
+
 const STAT_ROWS: [string, keyof PokeMon["stats"]][] = [["HP", "hp"], ["Atk", "atk"], ["Def", "def"], ["SpA", "spa"], ["SpD", "spd"], ["Spe", "spe"]];
 function StatBars({ stats }: { stats: PokeMon["stats"] }) {
   const total = stats.hp + stats.atk + stats.def + stats.spa + stats.spd + stats.spe;
@@ -102,6 +115,7 @@ import {
   buyLot,
   sellLot,
   passLot,
+  setLeagueTeamSize,
   type RoomState,
   type Coach,
   type Bid,
@@ -191,6 +205,16 @@ export default function Room({ code }: { code: string }) {
   const teamSize = league.team_size;
   const teamCount = (c: Coach) => wonLots.filter((l) => l.winner_coach_id === c.id).length;
   const isFull = (c: Coach) => teamCount(c) >= teamSize;
+
+  // Admin can resize teams any time (e.g. bump a league that was set too small).
+  function changeTeamSize(delta: number) {
+    const next = Math.max(1, Math.min(30, teamSize + delta));
+    if (next === teamSize) return;
+    setState((s) => (s ? { ...s, league: { ...s.league, team_size: next } } : s));
+    setLeagueTeamSize(league.id, next).then(refresh)
+      .catch((e) => { setError(e instanceof Error ? e.message : "Could not change team size."); refresh(); });
+  }
+  const teamSizeControl = isAdmin ? <AdminTeamSize size={teamSize} onChange={changeTeamSize} /> : null;
   const allFull = coaches.length > 0 && coaches.every(isFull);
 
   const iAmHigh = Boolean(me && highCoach && me.id === highCoach.id);
@@ -382,6 +406,7 @@ export default function Room({ code }: { code: string }) {
               {isAdmin && " (admin)"}
             </p>
           </div>
+          {teamSizeControl}
           <Link href="/" className="btn btn-ghost text-sm py-2">← Home</Link>
         </div>
 
@@ -484,6 +509,7 @@ export default function Room({ code }: { code: string }) {
             </p>
           </div>
           <div className="flex gap-2">
+            {teamSizeControl}
             <Link href={`/tournament/${league.code}`} className="btn btn-ghost text-sm py-2">Tournament</Link>
             <Link href="/" className="btn btn-ghost text-sm py-2">← Home</Link>
           </div>
@@ -569,6 +595,7 @@ export default function Room({ code }: { code: string }) {
             </p>
           </div>
           <div className="flex gap-2">
+            {teamSizeControl}
             <Link href={`/tournament/${league.code}`} className="btn btn-ghost text-sm py-2">Tournament</Link>
             <Link href="/" className="btn btn-ghost text-sm py-2">← Home</Link>
           </div>
@@ -683,6 +710,7 @@ export default function Room({ code }: { code: string }) {
           </p>
         </div>
         <div className="flex gap-2">
+          {teamSizeControl}
           <Link href={`/tournament/${league.code}`} className="btn btn-ghost text-sm py-2">Tournament</Link>
           <Link href="/" className="btn btn-ghost text-sm py-2">← Home</Link>
         </div>

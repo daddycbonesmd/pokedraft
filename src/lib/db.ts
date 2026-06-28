@@ -274,6 +274,12 @@ export async function saveTournament(leagueId: string, tournament: Tournament | 
   if (error) throw error;
 }
 
+export async function setLeagueTeamSize(leagueId: string, teamSize: number): Promise<void> {
+  const size = Math.max(1, Math.min(30, Math.round(teamSize)));
+  const { error } = await supabase.from("leagues").update({ team_size: size }).eq("id", leagueId);
+  if (error) throw error;
+}
+
 export function subscribeLeague(leagueId: string, onChange: () => void) {
   const channel = supabase
     .channel(`league:${leagueId}`)

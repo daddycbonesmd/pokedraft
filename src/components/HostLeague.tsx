@@ -3,9 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { loadFormats, type Format } from "@/lib/pokedex";
+import { loadFormats, loadPokedex, suggestTier, DEFAULT_TIER_VALUES, type Format } from "@/lib/pokedex";
 import { createLeague, type NominationMode } from "@/lib/db";
 import { supabaseReady } from "@/lib/supabase";
+
+const ALL_FORMAT_ID = "__all_pokemon__";
 
 const MODES: { value: NominationMode; label: string; blurb: string }[] = [
   { value: "snake_draft", label: "Point buy — snake", blurb: "Take turns picking any Pokémon, paying its points. Snake order (1‑2‑3‑4‑4‑3‑2‑1…)." },
@@ -32,8 +34,6 @@ export default function HostLeague() {
   const hydrated = useRef(false);
 
   useEffect(() => {
-    const f = loadFormats();
-    setFormats(f);
     // Restore an in-progress host form (e.g. after popping over to build a format).
     let saved: { adminName?: string; leagueName?: string; budget?: number; teamSize?: number; mode?: NominationMode; formatId?: string } | null = null;
     try { saved = JSON.parse(sessionStorage.getItem("pokedraft.hostDraft") || "null"); } catch {}
@@ -45,8 +45,26 @@ export default function HostLeague() {
       if (saved.mode) setMode(saved.mode);
     }
     const savedId = saved?.formatId;
-    if (savedId && f.some((x) => x.id === savedId)) setFormatId(savedId);
-    else if (f[0]) setFormatId(f[0].id);
+
+    // Build the always-available "Entire Pokédex" pool (every Pokémon, tiered by stats),
+    // then list it first ahead of any custom formats the host has built.
+    (async () => {
+      const custom = loadFormats();
+      let everything: Format | null = null;
+      try {
+        const dex = await loadPokedex();
+        const tiers: Record<number, string> = {};
+        for (const m of dex) tiers[m.id] = suggestTier(m.bst);
+        everything = {
+          id: ALL_FORMAT_ID, name: "Entire Pokédex", includedIds: dex.map((m) => m.id),
+          tiers, tierValues: DEFAULT_TIER_VALUES, updatedAt: 0,
+        };
+      } catch { /* fall back to custom formats only */ }
+      const all = everything ? [everything, ...custom] : custom;
+      setFormats(all);
+      if (savedId && all.some((x) => x.id === savedId)) setFormatId(savedId);
+      else if (all[0]) setFormatId(all[0].id);
+    })();
   }, []);
 
   // Persist the form on every change so leaving and coming back doesn't lose it.
