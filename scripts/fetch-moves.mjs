@@ -32,6 +32,7 @@ function scoreMove(name, d) {
   if ((d.pr ?? 0) > 0) return 82;                  // status priority (Quick Guard etc.)
   if (SPEED_CONTROL.has(name)) return 80;
   if (SPREAD_TARGETS.has(d.tg)) return 70;         // spread move
+  if (d.c !== "status" && (d.p ?? 0) >= 100 && (d.ac == null || d.ac >= 90)) return 68; // strong reliable attack (Close Combat, Brave Bird, Wave Crash…)
   if (DISRUPTION.has(name)) return 66;
   if (STATUS.has(name)) return 60;
   if (PROTECT_SUPPORT.has(name)) return 58;
@@ -100,8 +101,8 @@ const detailPairs = await pool(moveList, 20, async (mv) => {
     if (d.effect_chance != null) desc = desc.replace(/\$effect_chance/g, String(d.effect_chance));
     if (++done % 100 === 0) console.log(`  …${done}/${moveList.length}`);
     return [mv, { t: d.type?.name ?? "", p: d.power ?? null, c: d.damage_class?.name ?? "",
-      d: desc, pr: d.priority ?? 0, tg: d.target?.name ?? "", lb: (d.learned_by_pokemon || []).length }];
-  } catch { return [mv, { t: "", p: null, c: "", d: "", pr: 0, tg: "", lb: 99 }]; }
+      d: desc, pr: d.priority ?? 0, tg: d.target?.name ?? "", lb: (d.learned_by_pokemon || []).length, ac: d.accuracy ?? null }];
+  } catch { return [mv, { t: "", p: null, c: "", d: "", pr: 0, tg: "", lb: 99, ac: null }]; }
 });
 const detail = Object.fromEntries(detailPairs);
 
