@@ -5,7 +5,8 @@
 // Run: node scripts/fetch-moves.mjs
 import { readFile, writeFile } from "node:fs/promises";
 
-const RANDBATS = "https://raw.githubusercontent.com/pkmn/randbats/main/data/gen9randomdoublesbattle.json";
+const RANDBATS_DOUBLES = "https://raw.githubusercontent.com/pkmn/randbats/main/data/gen9randomdoublesbattle.json";
+const RANDBATS_SINGLES = "https://raw.githubusercontent.com/pkmn/randbats/main/data/gen9randombattle.json";
 const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
@@ -56,14 +57,18 @@ async function pool(items, size, fn) {
   return out;
 }
 
-console.log("Fetching random-battle movepools…");
-const rb = await getJSON(RANDBATS);
+console.log("Fetching random-battle movepools (doubles + singles)…");
 const speciesMoves = {};
-for (const [name, entry] of Object.entries(rb)) {
-  const s = new Set(entry.moves || []);
-  for (const role of Object.values(entry.roles || {})) for (const mv of role.moves || []) s.add(mv);
-  speciesMoves[norm(name)] = s;
+function addRandbats(rb) {
+  for (const [name, entry] of Object.entries(rb)) {
+    const key = norm(name);
+    const s = speciesMoves[key] ?? (speciesMoves[key] = new Set());
+    for (const mv of entry.moves || []) s.add(mv);
+    for (const role of Object.values(entry.roles || {})) for (const mv of role.moves || []) s.add(mv);
+  }
 }
+addRandbats(await getJSON(RANDBATS_DOUBLES));
+addRandbats(await getJSON(RANDBATS_SINGLES));
 
 // PokéAPI form name (normalized) → Showdown species key, for forms that differ.
 const FORM_KEY = {

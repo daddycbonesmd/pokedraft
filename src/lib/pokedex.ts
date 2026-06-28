@@ -9,6 +9,7 @@ export type PokeMon = {
   types: string[];
   abilities: string[];
   bst: number; // base stat total
+  stats: { hp: number; atk: number; def: number; spa: number; spd: number; spe: number };
   baseId: number; // national-dex id of the base species (for sprite fallback)
   gen: number;
   isMega: boolean;

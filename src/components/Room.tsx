@@ -67,6 +67,28 @@ function PoolFilter(p: PoolFilterProps) {
     </div>
   );
 }
+
+const STAT_ROWS: [string, keyof PokeMon["stats"]][] = [["HP", "hp"], ["Atk", "atk"], ["Def", "def"], ["SpA", "spa"], ["SpD", "spd"], ["Spe", "spe"]];
+function StatBars({ stats }: { stats: PokeMon["stats"] }) {
+  const total = stats.hp + stats.atk + stats.def + stats.spa + stats.spd + stats.spe;
+  const color = (v: number) => (v >= 130 ? "#2f8f83" : v >= 100 ? "#5867a8" : v >= 70 ? "#dca23e" : "#d9594c");
+  return (
+    <div>
+      <span className="font-semibold text-ink text-sm">Base stats <span className="text-ink-soft font-normal">({total})</span></span>
+      <div className="mt-1 space-y-1">
+        {STAT_ROWS.map(([label, key]) => (
+          <div key={key} className="flex items-center gap-2 text-xs">
+            <span className="w-8 text-ink-soft font-semibold">{label}</span>
+            <span className="w-7 text-right font-mono">{stats[key]}</span>
+            <div className="flex-1 h-1.5 rounded bg-black/10">
+              <div className="h-full rounded" style={{ width: `${Math.min(100, (stats[key] / 200) * 100)}%`, background: color(stats[key]) }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 import {
   getLeagueByCode,
   getRoomState,
@@ -574,6 +596,7 @@ export default function Room({ code }: { code: string }) {
                     {offer.types.map((t) => (<span key={t} className="chip" style={{ background: TYPE_COLORS[t] ?? "#888" }}>{t}</span>))}
                   </div>
                   <TypeEffect types={offer.types} />
+                  <div className="mt-2.5 max-w-xs"><StatBars stats={offer.stats} /></div>
                   {(moves.byMon[offer.id]?.length ?? 0) > 0 && (
                     <div className="mt-2.5 flex flex-wrap gap-1.5">
                       {moves.byMon[offer.id].map((mv) => (
@@ -709,9 +732,10 @@ export default function Room({ code }: { code: string }) {
                 </div>
               </div>
 
-              {/* Notable moves */}
+              {/* Stats + notable moves */}
               <div className="md:border-l md:border-dashed md:border-paper-edge md:pl-6">
-                <span className="font-semibold text-ink text-sm">Notable moves</span>
+                <StatBars stats={currentMon.stats} />
+                <span className="font-semibold text-ink text-sm block mt-3">Notable moves</span>
                 {(moves.byMon[currentMon.id]?.length ?? 0) > 0 ? (
                   <div className="flex flex-wrap gap-1.5 mt-1.5">
                     {moves.byMon[currentMon.id].map((mv) => (

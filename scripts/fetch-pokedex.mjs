@@ -61,6 +61,9 @@ const mons = await pool(list, 24, async (entry) => {
     const d = await getJSON(entry.url);
     const baseId = Number(d.species.url.split("/").filter(Boolean).pop());
     const bst = d.stats.reduce((s, x) => s + x.base_stat, 0);
+    const st = {};
+    for (const s of d.stats) st[s.stat.name] = s.base_stat;
+    const stats = { hp: st.hp, atk: st.attack, def: st.defense, spa: st["special-attack"], spd: st["special-defense"], spe: st.speed };
     const name = entry.name;
     const mon = {
       id: d.id,
@@ -69,6 +72,7 @@ const mons = await pool(list, 24, async (entry) => {
       types: d.types.map((t) => t.type.name),
       abilities: d.abilities.map((a) => pretty(a.ability.name)),
       bst,
+      stats,
       baseId,
       gen: genOf(baseId),
       isMega: isMegaName(name),
