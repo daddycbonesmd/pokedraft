@@ -38,7 +38,7 @@ export type Request = {
   teamPreview?: boolean;
   wait?: boolean;
   forceSwitch?: boolean[];
-  active?: ({ moves: { move: string; id: string; pp: number; maxpp: number; target: string; disabled?: boolean }[]; canTerastallize?: string } | null)[] | null;
+  active?: ({ moves: { move: string; id: string; pp: number; maxpp: number; target: string; disabled?: boolean }[]; canTerastallize?: string; canMegaEvo?: boolean; canMegaEvoX?: boolean; canMegaEvoY?: boolean } | null)[] | null;
   side?: { name: string; pokemon: { ident: string; details: string; condition: string; active: boolean }[] };
 };
 
@@ -114,7 +114,8 @@ export async function replay(commands: string[], viewer: Viewer): Promise<Battle
         }
         else if (tag === "move") log.push(`${nick(p[2])} used ${p[3]}.`);
         else if (tag === "-status") log.push(`${nick(p[2])} was ${STATUS_TEXT[p[3]] ?? p[3]}.`);
-        else if (tag === "-terastallize") log.push(`${nick(p[2])} Terastallized to ${p[3]}.`);
+        else if (tag === "-terastallize") log.push(`${nick(p[2])} Terastallized to ${p[3]}!`);
+        else if (tag === "-mega") log.push(`${nick(p[2])} Mega Evolved!`);
         else if (tag === "turn") { turn = Number(p[2]); log.push(`— Turn ${turn} —`); }
         else if (tag === "win") { winner = p[2]?.trim() || null; ended = true; }
         else if (tag === "tie") { winner = "tie"; ended = true; }

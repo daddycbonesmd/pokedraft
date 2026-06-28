@@ -22,6 +22,7 @@ export default function Battle({ id }: { id: string }) {
   const [snap, setSnap] = useState<BattleSnapshot | null>(null);
   const [choices, setChoices] = useState<BattleChoice[]>([]);
   const [pending, setPending] = useState<Record<number, SlotChoice>>({});
+  const [gimmick, setGimmick] = useState<Record<number, "mega" | "terastallize">>({});
   const [fatal, setFatal] = useState("");
   const [code, setCode] = useState("");
   const nameToId = useRef<Map<string, number>>(new Map());
@@ -57,7 +58,7 @@ export default function Battle({ id }: { id: string }) {
       ];
       const s = await replay(commands, viewer);
       if (cancelled) return;
-      setBattle(b); setChoices(ch); setSnap(s); setPending({});
+      setBattle(b); setChoices(ch); setSnap(s); setPending({}); setGimmick({});
 
       // Auto-resolve team preview (keep drafted order) so v1 jumps straight to
       // battling. Team preview is always this side's first choice (seq 0) — only
@@ -107,7 +108,8 @@ export default function Battle({ id }: { id: string }) {
     const cmd = activeSlots.map((i) => {
       const c = pending[i];
       if (c.kind === "switch") return `switch ${c.index}`;
-      return `move ${c.index}${c.moveTarget ? ` ${c.moveTarget}` : ""}`;
+      const g = gimmick[i] ? ` ${gimmick[i]}` : "";
+      return `move ${c.index}${c.moveTarget ? ` ${c.moveTarget}` : ""}${g}`;
     }).join(", ");
     await submitChoice(id, viewer as string, myChoiceCount, cmd);
   }
@@ -149,8 +151,9 @@ export default function Battle({ id }: { id: string }) {
             <div className={activeSlots.length > 1 ? "grid sm:grid-cols-2 gap-3" : ""}>
               {activeSlots.map((i) => (
                 <SlotChooser
-                  key={i} slot={i} req={req!} benched={benched} chosen={pending[i]}
+                  key={i} slot={i} req={req!} benched={benched} chosen={pending[i]} gimmick={gimmick[i]}
                   onMove={(mi, t) => chooseMove(i, mi, t)} onSwitch={(pi) => chooseSwitch(i, pi)}
+                  onGimmick={(g) => setGimmick((p) => { const n = { ...p }; if (g) n[i] = g; else delete n[i]; return n; })}
                 />
               ))}
             </div>
@@ -203,14 +206,34 @@ function SideRow({ side, nameToId, align }: { side: { name: string; active: Slot
   );
 }
 
-function SlotChooser({ slot, req, benched, chosen, onMove, onSwitch }: {
+function SlotChooser({ slot, req, benched, chosen, gimmick, onMove, onSwitch, onGimmick }: {
   slot: number; req: Request; benched: { details: string; party: number }[]; chosen?: SlotChoice;
+  gimmick?: "mega" | "terastallize";
   onMove: (moveIndex: number, target: string) => void; onSwitch: (partyIndex: number) => void;
+  onGimmick: (g?: "mega" | "terastallize") => void;
 }) {
   const active = req.active?.[slot];
   const forceSwitch = req.forceSwitch?.[slot];
   return (
     <div className="border border-dashed border-paper-edge rounded p-2">
+      {!forceSwitch && active && (active.canMegaEvo || active.canTerastallize) && (
+        <div className="flex gap-1.5 mb-2">
+          {active.canMegaEvo && (
+            <button onClick={() => onGimmick(gimmick === "mega" ? undefined : "mega")}
+              className="text-xs font-bold rounded px-2 py-1 transition"
+              style={{ background: gimmick === "mega" ? "#a25fb8" : "rgba(162,95,184,0.15)", color: gimmick === "mega" ? "#fff" : "#7d3f93" }}>
+              ⬢ Mega Evolve
+            </button>
+          )}
+          {active.canTerastallize && (
+            <button onClick={() => onGimmick(gimmick === "terastallize" ? undefined : "terastallize")}
+              className="text-xs font-bold rounded px-2 py-1 transition"
+              style={{ background: gimmick === "terastallize" ? "#d24f96" : "rgba(210,79,150,0.15)", color: gimmick === "terastallize" ? "#fff" : "#a83274" }}>
+              ✦ Tera {active.canTerastallize}
+            </button>
+          )}
+        </div>
+      )}
       {!forceSwitch && active && (
         <div className="grid grid-cols-2 gap-1.5 mb-2">
           {active.moves.map((mv, j) => {
