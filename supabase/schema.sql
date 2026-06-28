@@ -16,6 +16,7 @@ create table if not exists leagues (
   tier_values jsonb not null default '{}'::jsonb,  -- { "<tier>": <points> }
   team_size int not null default 6,         -- max Pokémon per coach
   tournament jsonb,                         -- bracket state (null until created)
+  battle_format text not null default 'doubles',  -- singles | doubles
   created_at timestamptz not null default now()
 );
 -- If the table already existed before these columns were added:
@@ -23,6 +24,7 @@ alter table leagues add column if not exists ruleset text not null default '';
 alter table leagues add column if not exists tier_values jsonb not null default '{}'::jsonb;
 alter table leagues add column if not exists team_size int not null default 6;
 alter table leagues add column if not exists tournament jsonb;
+alter table leagues add column if not exists battle_format text not null default 'doubles';
 
 create table if not exists coaches (
   id uuid primary key default gen_random_uuid(),

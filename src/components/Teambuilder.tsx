@@ -21,6 +21,7 @@ export default function Teambuilder({ code }: { code: string }) {
   const [roles, setRoles] = useState<Record<string, RoleSet[]>>({});
   const [movepools, setMovepools] = useState<Record<string, string[]>>({});
   const [items, setItems] = useState<string[]>([]);
+  const [battleFormat, setBattleFormat] = useState<string>("doubles");
   const [fatal, setFatal] = useState("");
   const [saved, setSaved] = useState<"idle" | "saving" | "ok">("idle");
   const [copied, setCopied] = useState(false);
@@ -38,6 +39,7 @@ export default function Teambuilder({ code }: { code: string }) {
       const me = state.coaches.find((c) => c.id === identity.coachId);
       if (!me) { setFatal("You're not a coach in this league."); return; }
       setCoachId(me.id);
+      setBattleFormat(league.battle_format ?? "doubles");
       setRoles(r); setMovepools(mp); setItems(it);
 
       const monMap = new Map(dex.map((m) => [m.id, m]));
@@ -113,7 +115,8 @@ export default function Teambuilder({ code }: { code: string }) {
         <div>
           <h1 className="font-display text-3xl font-black">Build your <span className="text-coral">battle team</span></h1>
           <p className="text-sm text-ink-soft">
-            League <span className="font-mono font-bold">{code}</span> · {readyCount}/{mons.length} ready ·{" "}
+            League <span className="font-mono font-bold">{code}</span> ·{" "}
+            <span className="capitalize font-semibold text-ink">{battleFormat}</span> · {readyCount}/{mons.length} ready ·{" "}
             {saved === "saving" ? "saving…" : saved === "ok" ? "saved" : ""}
           </p>
         </div>

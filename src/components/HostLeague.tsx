@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { loadFormats, loadPokedex, suggestTier, DEFAULT_TIER_VALUES, type Format } from "@/lib/pokedex";
-import { createLeague, type NominationMode } from "@/lib/db";
+import { createLeague, type NominationMode, type BattleFormat } from "@/lib/db";
 import { supabaseReady } from "@/lib/supabase";
 
 const ALL_FORMAT_ID = "__all_pokemon__";
@@ -27,6 +27,7 @@ export default function HostLeague() {
   const [budget, setBudget] = useState(100);
   const [teamSize, setTeamSize] = useState(6);
   const [mode, setMode] = useState<NominationMode>("one_random");
+  const [battleFormat, setBattleFormat] = useState<BattleFormat>("doubles");
   const [formatId, setFormatId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -35,7 +36,7 @@ export default function HostLeague() {
 
   useEffect(() => {
     // Restore an in-progress host form (e.g. after popping over to build a format).
-    let saved: { adminName?: string; leagueName?: string; budget?: number; teamSize?: number; mode?: NominationMode; formatId?: string } | null = null;
+    let saved: { adminName?: string; leagueName?: string; budget?: number; teamSize?: number; mode?: NominationMode; battleFormat?: BattleFormat; formatId?: string } | null = null;
     try { saved = JSON.parse(sessionStorage.getItem("pokedraft.hostDraft") || "null"); } catch {}
     if (saved) {
       setAdminName(saved.adminName ?? "");
@@ -43,6 +44,7 @@ export default function HostLeague() {
       if (typeof saved.budget === "number") setBudget(saved.budget);
       if (typeof saved.teamSize === "number") setTeamSize(saved.teamSize);
       if (saved.mode) setMode(saved.mode);
+      if (saved.battleFormat) setBattleFormat(saved.battleFormat);
     }
     const savedId = saved?.formatId;
 
@@ -70,8 +72,8 @@ export default function HostLeague() {
   // Persist the form on every change so leaving and coming back doesn't lose it.
   useEffect(() => {
     if (!hydrated.current) { hydrated.current = true; return; }
-    sessionStorage.setItem("pokedraft.hostDraft", JSON.stringify({ adminName, leagueName, budget, teamSize, mode, formatId }));
-  }, [adminName, leagueName, budget, teamSize, mode, formatId]);
+    sessionStorage.setItem("pokedraft.hostDraft", JSON.stringify({ adminName, leagueName, budget, teamSize, mode, battleFormat, formatId }));
+  }, [adminName, leagueName, budget, teamSize, mode, battleFormat, formatId]);
 
   async function start() {
     setError("");
@@ -89,6 +91,7 @@ export default function HostLeague() {
         ruleset: fmt.ruleset ? `${fmt.ruleset.name} · ${fmt.ruleset.gimmick}` : "",
         tierValues: fmt.tierValues,
         teamSize,
+        battleFormat,
       });
       sessionStorage.removeItem("pokedraft.hostDraft");
       router.push(`/room/${league.code}`);
@@ -119,6 +122,25 @@ export default function HostLeague() {
         </Field>
         <Field label="Pokémon per team">
           <input type="number" className="input" value={teamSize} min={1} max={24} onChange={(e) => setTeamSize(Number(e.target.value))} />
+        </Field>
+        <Field label="Battle format">
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              { value: "doubles", label: "Doubles", blurb: "VGC-style 2v2" },
+              { value: "singles", label: "Singles", blurb: "1v1, six Pokémon" },
+            ] as const).map((b) => (
+              <button
+                key={b.value}
+                type="button"
+                onClick={() => setBattleFormat(b.value)}
+                className="paper text-left p-3 transition"
+                style={battleFormat === b.value ? { boxShadow: "0 0 0 2.5px var(--coral), 0 8px 16px -12px rgba(44,39,34,0.5)" } : undefined}
+              >
+                <div className="font-display font-bold">{b.label}</div>
+                <div className="text-xs text-ink-soft">{b.blurb}</div>
+              </button>
+            ))}
+          </div>
         </Field>
         <Field label="Draft format">
           <div className="space-y-2">

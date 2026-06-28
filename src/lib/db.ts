@@ -15,8 +15,14 @@ export type League = {
   tournament: Tournament | null;
   status: string;
   ruleset: string; // e.g. "VGC 2025 Reg I · Tera" — shown in the room
+  battle_format: BattleFormat; // singles or doubles — drives the battle engine
   created_at: string;
 };
+
+export type BattleFormat = "singles" | "doubles";
+// The Showdown engine format id used for battles in this league.
+export const engineFormat = (f: BattleFormat) =>
+  f === "singles" ? "gen9customgame" : "gen9doublescustomgame";
 
 export type Coach = {
   id: string;
@@ -109,25 +115,31 @@ export async function createLeague(opts: {
   ruleset?: string;
   tierValues?: Record<string, number>;
   teamSize?: number;
+  battleFormat?: BattleFormat;
 }): Promise<{ league: League; coach: Coach }> {
   const code = makeCode();
   const admin_token = crypto.randomUUID();
-  const { data: league, error } = await supabase
+  const base = {
+    code,
+    name: opts.name,
+    admin_token,
+    budget: opts.budget,
+    nomination_mode: opts.mode,
+    pool: opts.pool,
+    tier_values: opts.tierValues ?? {},
+    team_size: opts.teamSize ?? 6,
+    status: "drafting",
+    ruleset: opts.ruleset ?? "",
+  };
+  let { data: league, error } = await supabase
     .from("leagues")
-    .insert({
-      code,
-      name: opts.name,
-      admin_token,
-      budget: opts.budget,
-      nomination_mode: opts.mode,
-      pool: opts.pool,
-      tier_values: opts.tierValues ?? {},
-      team_size: opts.teamSize ?? 6,
-      status: "drafting",
-      ruleset: opts.ruleset ?? "",
-    })
+    .insert({ ...base, battle_format: opts.battleFormat ?? "doubles" })
     .select()
     .single();
+  // Tolerate the battle_format migration not being applied yet.
+  if (error && /battle_format|column/i.test(error.message ?? "")) {
+    ({ data: league, error } = await supabase.from("leagues").insert(base).select().single());
+  }
   if (error) throw error;
 
   const { data: coach, error: e2 } = await supabase
