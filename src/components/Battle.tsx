@@ -13,7 +13,9 @@ import {
 } from "@/lib/battle";
 
 const NEED_TARGET = new Set(["normal", "any", "adjacentFoe"]);
-type SlotChoice = { kind: "move"; index: number; moveTarget: string } | { kind: "switch"; index: number };
+type SlotChoice =
+  | { kind: "move"; index: number; moveTarget: string; needTarget: boolean }
+  | { kind: "switch"; index: number };
 
 export default function Battle({ id }: { id: string }) {
   const [battle, setBattle] = useState<BattleRow | null>(null);
@@ -54,13 +56,7 @@ export default function Battle({ id }: { id: string }) {
       if (cancelled) return;
       setBattle(b); setChoices(ch); setSnap(s); setPending({}); setGimmick({});
 
-      // Auto-resolve team preview (keep drafted order) so v1 jumps straight to
-      // battling. Team preview is always this side's first choice (seq 0) — only
-      // submit when we have none yet, so realtime re-renders don't spam choices.
-      if ((viewer === "p1" || viewer === "p2") && s.request?.teamPreview && ch.filter((c) => c.side === viewer).length === 0) {
-        await submitChoice(id, viewer, 0, "default");
-      }
-      // Any client persists the result once.
+      // Any client persists the result once the engine declares a winner.
       if (s.ended && b.status === "active") await finishBattle(id, s.winner);
     };
     run();
@@ -74,7 +70,12 @@ export default function Battle({ id }: { id: string }) {
 
   const myChoiceCount = choices.filter((c) => c.side === viewer).length;
   const req = snap.request;
-  const iMustChoose = (viewer === "p1" || viewer === "p2") && needsChoice(req) && !req?.teamPreview;
+  const isPlayer = viewer === "p1" || viewer === "p2";
+  const ended = snap.ended || battle.status === "done";
+  const winner = snap.winner ?? battle.winner;
+  const aliveFoes = snap.far.active.filter((s) => s && !s.fainted).length;
+  const iMustChoose = isPlayer && !ended && needsChoice(req) && !req?.teamPreview;
+  const inTeamPreview = isPlayer && !ended && req?.teamPreview && myChoiceCount === 0;
 
   // Which active slots need a decision this request.
   const activeSlots: number[] = [];
@@ -84,16 +85,19 @@ export default function Battle({ id }: { id: string }) {
       if (req.forceSwitch?.[i] || req.active?.[i]) activeSlots.push(i);
     }
   }
-  const allChosen = activeSlots.every((i) => pending[i]);
-
-  const aliveFoeTarget = () => {
-    const idx = snap.far.active.findIndex((s) => s && !s.fainted);
-    return idx >= 0 ? idx + 1 : 1;
+  const slotComplete = (i: number) => {
+    const c = pending[i];
+    if (!c) return false;
+    return !(c.kind === "move" && c.needTarget && !c.moveTarget);
   };
+  const allChosen = activeSlots.every(slotComplete);
 
   function chooseMove(slot: number, moveIndex: number, target: string) {
-    const needT = NEED_TARGET.has(target) && (snap?.far.active.filter((s) => s && !s.fainted).length ?? 0) > 1;
-    setPending((p) => ({ ...p, [slot]: { kind: "move", index: moveIndex, moveTarget: needT ? String(aliveFoeTarget()) : "" } }));
+    const needTarget = NEED_TARGET.has(target) && aliveFoes > 1;
+    setPending((p) => ({ ...p, [slot]: { kind: "move", index: moveIndex, moveTarget: "", needTarget } }));
+  }
+  function chooseTarget(slot: number, foeIndex: number) {
+    setPending((p) => { const c = p[slot]; if (c?.kind !== "move") return p; return { ...p, [slot]: { ...c, moveTarget: String(foeIndex + 1) } }; });
   }
   function chooseSwitch(slot: number, partyIndex: number) {
     setPending((p) => ({ ...p, [slot]: { kind: "switch", index: partyIndex } }));
@@ -107,6 +111,18 @@ export default function Battle({ id }: { id: string }) {
     }).join(", ");
     await submitChoice(id, viewer as string, myChoiceCount, cmd);
   }
+  async function submitLeads(order: number[]) {
+    if (!req?.side) return;
+    const all = req.side.pokemon.map((_, i) => i + 1);
+    const full = [...order, ...all.filter((n) => !order.includes(n))];
+    const bring = battle!.format === "singles" ? all.length : 4;
+    await submitChoice(id, viewer as string, 0, "team " + full.slice(0, bring).join(""));
+  }
+  async function forfeit() {
+    if (!isPlayer || ended) return;
+    if (!confirm("Forfeit this battle?")) return;
+    await finishBattle(id, viewer === "p1" ? battle!.p2_name : battle!.p1_name);
+  }
 
   const benched = (req?.side?.pokemon ?? [])
     .map((p, i) => ({ ...p, party: i + 1 }))
@@ -119,7 +135,10 @@ export default function Battle({ id }: { id: string }) {
           {battle.p1_name} <span className="text-coral">vs</span> {battle.p2_name}
           <span className="chip ml-2 align-middle capitalize" style={{ background: "var(--mustard)" }}>{battle.format}</span>
         </h1>
-        <Link href={code ? `/play/${code}` : "/"} className="btn btn-ghost text-sm py-2">← Battles</Link>
+        <div className="flex gap-2">
+          {isPlayer && !ended && <button onClick={forfeit} className="btn btn-ghost text-sm py-2 text-coral">Forfeit</button>}
+          <Link href={code ? `/play/${code}` : "/"} className="btn btn-ghost text-sm py-2">← Battles</Link>
+        </div>
       </div>
 
       {/* Field — opponent up-right, you down-left (Showdown layout) */}
@@ -139,14 +158,16 @@ export default function Battle({ id }: { id: string }) {
 
       {/* Status / choices */}
       <div className="paper p-4 mt-4">
-        {snap.ended ? (
+        {ended ? (
           <p className="hand text-3xl text-coral text-center">
-            {snap.winner === "tie" ? "It's a tie!" : `${snap.winner} wins!`}
+            {!winner || winner === "tie" ? "It's a tie!" : `${winner} wins!`}
           </p>
+        ) : inTeamPreview ? (
+          <TeamPreview req={req!} format={battle.format} onConfirm={submitLeads} />
         ) : viewer === "spectator" ? (
           <p className="text-center text-ink-soft">Spectating · turn {snap.turn}</p>
         ) : req?.teamPreview ? (
-          <p className="text-center text-ink-soft">Setting up…</p>
+          <p className="text-center text-ink-soft">Waiting for {snap.far.name} to choose leads…</p>
         ) : iMustChoose ? (
           <div>
             <p className="text-sm font-semibold mb-2">Your move{activeSlots.length > 1 ? "s" : ""} · turn {snap.turn}</p>
@@ -154,13 +175,14 @@ export default function Battle({ id }: { id: string }) {
               {activeSlots.map((i) => (
                 <SlotChooser
                   key={i} slot={i} req={req!} benched={benched} chosen={pending[i]} gimmick={gimmick[i]}
-                  onMove={(mi, t) => chooseMove(i, mi, t)} onSwitch={(pi) => chooseSwitch(i, pi)}
+                  foes={snap.far.active} onMove={(mi, t) => chooseMove(i, mi, t)} onTarget={(fi) => chooseTarget(i, fi)}
+                  onSwitch={(pi) => chooseSwitch(i, pi)}
                   onGimmick={(g) => setGimmick((p) => { const n = { ...p }; if (g) n[i] = g; else delete n[i]; return n; })}
                 />
               ))}
             </div>
             <button className="btn btn-coral w-full mt-3" disabled={!allChosen} onClick={submit}>
-              {allChosen ? "Lock in" : "Choose an action"}
+              {allChosen ? "Lock in" : activeSlots.some((i) => pending[i]?.kind === "move" && (pending[i] as { needTarget: boolean }).needTarget && !(pending[i] as { moveTarget: string }).moveTarget) ? "Pick a target" : "Choose an action"}
             </button>
           </div>
         ) : (
@@ -237,16 +259,30 @@ function HpPlate({ side, align }: { side: { name: string; active: Slot[] }; alig
   );
 }
 
-function SlotChooser({ slot, req, benched, chosen, gimmick, onMove, onSwitch, onGimmick }: {
+function SlotChooser({ slot, req, benched, chosen, gimmick, foes, onMove, onTarget, onSwitch, onGimmick }: {
   slot: number; req: Request; benched: { details: string; party: number }[]; chosen?: SlotChoice;
-  gimmick?: "mega" | "terastallize";
-  onMove: (moveIndex: number, target: string) => void; onSwitch: (partyIndex: number) => void;
-  onGimmick: (g?: "mega" | "terastallize") => void;
+  gimmick?: "mega" | "terastallize"; foes: Slot[];
+  onMove: (moveIndex: number, target: string) => void; onTarget: (foeIndex: number) => void;
+  onSwitch: (partyIndex: number) => void; onGimmick: (g?: "mega" | "terastallize") => void;
 }) {
   const active = req.active?.[slot];
   const forceSwitch = req.forceSwitch?.[slot];
+  const pickingTarget = chosen?.kind === "move" && chosen.needTarget && !chosen.moveTarget;
   return (
     <div className="border border-dashed border-paper-edge rounded p-2">
+      {pickingTarget && (
+        <div className="mb-2">
+          <div className="text-[11px] font-semibold text-ink-soft mb-1">Target which foe?</div>
+          <div className="flex gap-1.5">
+            {foes.map((f, fi) => f && !f.fainted && (
+              <button key={fi} onClick={() => onTarget(fi)}
+                className="text-xs font-semibold rounded px-2 py-1 bg-coral/15 text-coral hover:bg-coral/30 transition">
+                {f.species}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {!forceSwitch && active && (active.canMegaEvo || active.canTerastallize) && (
         <div className="flex gap-1.5 mb-2">
           {active.canMegaEvo && (
@@ -292,6 +328,39 @@ function SlotChooser({ slot, req, benched, chosen, gimmick, onMove, onSwitch, on
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function TeamPreview({ req, format, onConfirm }: { req: Request; format: string; onConfirm: (order: number[]) => void }) {
+  const [order, setOrder] = useState<number[]>([]);
+  const mons = req.side?.pokemon ?? [];
+  const doubles = format !== "singles";
+  const toggle = (n: number) => setOrder((o) => (o.includes(n) ? o.filter((x) => x !== n) : doubles && o.length >= 4 ? o : [...o, n]));
+  return (
+    <div>
+      <p className="text-sm font-semibold mb-2 text-center">
+        {doubles ? "Pick the 4 you'll bring — tap in order (first 2 lead)" : "Tap your lead, then the rest in order (optional)"}
+      </p>
+      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+        {mons.map((p, i) => {
+          const n = i + 1, pos = order.indexOf(n);
+          const species = p.details.split(",")[0];
+          const url = (Sprites.getPokemon(species, { gen: "ani", side: "p1" }) as { url: string }).url;
+          return (
+            <button key={n} onClick={() => toggle(n)} className="paper p-1.5 relative grid place-items-center"
+              style={{ outline: pos >= 0 ? "2.5px solid var(--coral)" : "none" }}>
+              {pos >= 0 && <span className="absolute top-0 left-0 bg-coral text-white text-[10px] font-bold w-4 h-4 grid place-items-center rounded-br">{pos + 1}</span>}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={url} alt={species} className="h-12" style={{ imageRendering: "pixelated" }} />
+              <div className="text-[10px] truncate w-full text-center">{species}</div>
+            </button>
+          );
+        })}
+      </div>
+      <button className="btn btn-coral w-full mt-3" disabled={doubles && order.length < 4} onClick={() => onConfirm(order)}>
+        {doubles ? (order.length < 4 ? `Pick ${4 - order.length} more` : "Bring these 4") : "Start battle"}
+      </button>
     </div>
   );
 }
