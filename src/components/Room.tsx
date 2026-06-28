@@ -408,6 +408,7 @@ export default function Room({ code }: { code: string }) {
           </div>
           {teamSizeControl}
           <Link href={`/team/${league.code}`} className="btn btn-ghost text-sm py-2">Team</Link>
+          <Link href={`/play/${league.code}`} className="btn btn-ghost text-sm py-2">Battle</Link>
           <Link href="/" className="btn btn-ghost text-sm py-2">← Home</Link>
         </div>
 
@@ -512,6 +513,7 @@ export default function Room({ code }: { code: string }) {
           <div className="flex gap-2">
             {teamSizeControl}
             <Link href={`/team/${league.code}`} className="btn btn-ghost text-sm py-2">Team</Link>
+            <Link href={`/play/${league.code}`} className="btn btn-ghost text-sm py-2">Battle</Link>
             <Link href={`/tournament/${league.code}`} className="btn btn-ghost text-sm py-2">Tournament</Link>
             <Link href="/" className="btn btn-ghost text-sm py-2">← Home</Link>
           </div>
@@ -599,6 +601,7 @@ export default function Room({ code }: { code: string }) {
           <div className="flex gap-2">
             {teamSizeControl}
             <Link href={`/team/${league.code}`} className="btn btn-ghost text-sm py-2">Team</Link>
+            <Link href={`/play/${league.code}`} className="btn btn-ghost text-sm py-2">Battle</Link>
             <Link href={`/tournament/${league.code}`} className="btn btn-ghost text-sm py-2">Tournament</Link>
             <Link href="/" className="btn btn-ghost text-sm py-2">← Home</Link>
           </div>
@@ -715,6 +718,7 @@ export default function Room({ code }: { code: string }) {
         <div className="flex gap-2">
           {teamSizeControl}
           <Link href={`/team/${league.code}`} className="btn btn-ghost text-sm py-2">Team</Link>
+          <Link href={`/play/${league.code}`} className="btn btn-ghost text-sm py-2">Battle</Link>
           <Link href={`/tournament/${league.code}`} className="btn btn-ghost text-sm py-2">Tournament</Link>
           <Link href="/" className="btn btn-ghost text-sm py-2">← Home</Link>
         </div>

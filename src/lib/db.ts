@@ -158,6 +158,11 @@ export async function getLeagueByCode(code: string): Promise<League | null> {
   return data;
 }
 
+export async function getLeagueById(id: string): Promise<League | null> {
+  const { data } = await supabase.from("leagues").select().eq("id", id).maybeSingle();
+  return data;
+}
+
 export async function getLeaguesByCodes(codes: string[]): Promise<League[]> {
   if (!codes.length) return [];
   const { data } = await supabase.from("leagues").select().in("code", codes.map((c) => c.toUpperCase()));
@@ -297,6 +302,73 @@ export async function setLeagueTeamSize(leagueId: string, teamSize: number): Pro
 export async function saveTeam(coachId: string, team: Team): Promise<void> {
   const { error } = await supabase.from("coaches").update({ team }).eq("id", coachId);
   if (error) throw error;
+}
+
+// ── Battles (Stage 3) ──────────────────────────────────────────────
+export type Battle = {
+  id: string;
+  league_id: string;
+  format: string;
+  p1_coach_id: string | null;
+  p2_coach_id: string | null;
+  p1_name: string;
+  p2_name: string;
+  p1_team: string; // packed Showdown team
+  p2_team: string;
+  seed: number[];
+  status: string; // active | done
+  winner: string | null;
+  created_at: string;
+};
+export type BattleChoice = { id: string; battle_id: string; side: string; seq: number; choice: string; created_at: string };
+
+export async function createBattle(b: {
+  leagueId: string; format: string;
+  p1: { coachId: string; name: string; team: string };
+  p2: { coachId: string; name: string; team: string };
+  seed: number[];
+}): Promise<Battle> {
+  const { data, error } = await supabase.from("battles").insert({
+    league_id: b.leagueId, format: b.format,
+    p1_coach_id: b.p1.coachId, p2_coach_id: b.p2.coachId,
+    p1_name: b.p1.name, p2_name: b.p2.name,
+    p1_team: b.p1.team, p2_team: b.p2.team, seed: b.seed,
+  }).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function getBattle(id: string): Promise<Battle | null> {
+  const { data } = await supabase.from("battles").select().eq("id", id).maybeSingle();
+  return data;
+}
+
+export async function listBattles(leagueId: string): Promise<Battle[]> {
+  const { data } = await supabase.from("battles").select().eq("league_id", leagueId).order("created_at", { ascending: false });
+  return data ?? [];
+}
+
+export async function getBattleChoices(battleId: string): Promise<BattleChoice[]> {
+  const { data } = await supabase.from("battle_choices").select().eq("battle_id", battleId).order("created_at").order("id");
+  return data ?? [];
+}
+
+export async function submitChoice(battleId: string, side: string, seq: number, choice: string): Promise<void> {
+  const { error } = await supabase.from("battle_choices").insert({ battle_id: battleId, side, seq, choice });
+  if (error && !/duplicate|unique|conflict/i.test(error.message ?? "")) throw error; // ignore double-submit
+}
+
+export async function finishBattle(id: string, winner: string | null): Promise<void> {
+  await supabase.from("battles").update({ status: "done", winner }).eq("id", id).eq("status", "active");
+}
+
+export function subscribeBattle(battleId: string, onChange: () => void) {
+  const channel = supabase
+    .channel(`battle:${battleId}`)
+    .on("postgres_changes", { event: "*", schema: "public", table: "battles", filter: `id=eq.${battleId}` }, onChange)
+    .on("postgres_changes", { event: "*", schema: "public", table: "battle_choices", filter: `battle_id=eq.${battleId}` }, onChange)
+    .subscribe();
+  return () => { supabase.removeChannel(channel); };
 }
 
 export function subscribeLeague(leagueId: string, onChange: () => void) {

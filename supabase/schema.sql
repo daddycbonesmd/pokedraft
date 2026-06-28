@@ -56,9 +56,41 @@ create table if not exists bids (
   created_at timestamptz not null default now()
 );
 
+-- ── Battles (Stage 3) ─────────────────────────────────────────────
+-- A battle is fully described by its two packed teams + a seed + the ordered
+-- list of player choices (battle_choices). Every client replays the engine
+-- locally to render — no central referee.
+create table if not exists battles (
+  id uuid primary key default gen_random_uuid(),
+  league_id uuid not null references leagues(id) on delete cascade,
+  format text not null default 'doubles',   -- singles | doubles
+  p1_coach_id uuid references coaches(id) on delete set null,
+  p2_coach_id uuid references coaches(id) on delete set null,
+  p1_name text not null default 'P1',
+  p2_name text not null default 'P2',
+  p1_team text not null,                     -- packed Showdown team
+  p2_team text not null,
+  seed jsonb not null default '[]'::jsonb,   -- PRNG seed so all clients agree
+  status text not null default 'active',     -- active | done
+  winner text,                               -- coach name, 'tie', or null
+  created_at timestamptz not null default now()
+);
+
+create table if not exists battle_choices (
+  id uuid primary key default gen_random_uuid(),
+  battle_id uuid not null references battles(id) on delete cascade,
+  side text not null,                        -- p1 | p2
+  seq int not null,                          -- per-side index (prevents double-submit)
+  choice text not null,                      -- e.g. "move 1", "switch 3", "default"
+  created_at timestamptz not null default now(),
+  unique (battle_id, side, seq)
+);
+
 create index if not exists idx_coaches_league on coaches(league_id);
 create index if not exists idx_lots_league on lots(league_id);
 create index if not exists idx_bids_lot on bids(lot_id);
+create index if not exists idx_battles_league on battles(league_id);
+create index if not exists idx_battle_choices_battle on battle_choices(battle_id, created_at);
 
 -- ── Realtime (push changes to every connected client) ─────────────
 do $$
@@ -71,6 +103,10 @@ begin
     alter publication supabase_realtime add table coaches; end if;
   if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and tablename='leagues') then
     alter publication supabase_realtime add table leagues; end if;
+  if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and tablename='battles') then
+    alter publication supabase_realtime add table battles; end if;
+  if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and tablename='battle_choices') then
+    alter publication supabase_realtime add table battle_choices; end if;
 end $$;
 
 -- ── Row Level Security ────────────────────────────────────────────
@@ -80,13 +116,19 @@ alter table leagues enable row level security;
 alter table coaches enable row level security;
 alter table lots    enable row level security;
 alter table bids    enable row level security;
+alter table battles enable row level security;
+alter table battle_choices enable row level security;
 
 drop policy if exists p_leagues_all on leagues;
 drop policy if exists p_coaches_all on coaches;
 drop policy if exists p_lots_all    on lots;
 drop policy if exists p_bids_all     on bids;
+drop policy if exists p_battles_all  on battles;
+drop policy if exists p_battle_choices_all on battle_choices;
 
 create policy p_leagues_all on leagues for all using (true) with check (true);
 create policy p_coaches_all on coaches for all using (true) with check (true);
 create policy p_lots_all    on lots    for all using (true) with check (true);
 create policy p_bids_all    on bids    for all using (true) with check (true);
+create policy p_battles_all on battles for all using (true) with check (true);
+create policy p_battle_choices_all on battle_choices for all using (true) with check (true);
