@@ -30,8 +30,10 @@ create table if not exists coaches (
   name text not null,
   color text not null default '#d9594c',
   is_admin boolean not null default false,
+  team jsonb,                               -- battle sets the coach built (null until built)
   created_at timestamptz not null default now()
 );
+alter table coaches add column if not exists team jsonb;
 
 create table if not exists lots (
   id uuid primary key default gen_random_uuid(),

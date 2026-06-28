@@ -1,5 +1,6 @@
 import { supabase, COACH_COLORS } from "./supabase";
 import { type Tournament } from "./tournament";
+import { type Team } from "./teambuilder";
 
 export type League = {
   id: string;
@@ -23,6 +24,7 @@ export type Coach = {
   name: string;
   color: string;
   is_admin: boolean;
+  team: Team | null; // battle sets the coach has built for their drafted Pokémon
   created_at: string;
 };
 
@@ -277,6 +279,11 @@ export async function saveTournament(leagueId: string, tournament: Tournament | 
 export async function setLeagueTeamSize(leagueId: string, teamSize: number): Promise<void> {
   const size = Math.max(1, Math.min(30, Math.round(teamSize)));
   const { error } = await supabase.from("leagues").update({ team_size: size }).eq("id", leagueId);
+  if (error) throw error;
+}
+
+export async function saveTeam(coachId: string, team: Team): Promise<void> {
+  const { error } = await supabase.from("coaches").update({ team }).eq("id", coachId);
   if (error) throw error;
 }
 

@@ -128,3 +128,23 @@ for (const m of dex) {
 }
 await writeFile(new URL("../public/movepools.json", import.meta.url), JSON.stringify(movepoolsOut));
 console.log(`Wrote movepools.json (${Object.keys(movepoolsOut).length} mons)`);
+
+// ── species.json (monId → canonical Showdown species name, so teams import cleanly) ──
+function showdownSpecies(m) {
+  let sp = Dex.species.get(m.name);
+  if (!sp.exists) sp = Dex.species.get(FORM_KEY[norm(m.name)] || "");
+  if (!sp.exists && m.isMega) sp = Dex.species.get(baseName.get(m.baseId) || "");
+  return sp.exists ? sp.name : m.display;
+}
+const speciesOut = {};
+for (const m of dex) speciesOut[m.id] = showdownSpecies(m);
+await writeFile(new URL("../public/species.json", import.meta.url), JSON.stringify(speciesOut));
+console.log(`Wrote species.json (${Object.keys(speciesOut).length} mons)`);
+
+// ── items.json (all battle item names, for the item picker) ──
+const itemsOut = Dex.items.all()
+  .filter((i) => i.exists && i.name && !i.isNonstandard)
+  .map((i) => i.name)
+  .sort();
+await writeFile(new URL("../public/items.json", import.meta.url), JSON.stringify(itemsOut));
+console.log(`Wrote items.json (${itemsOut.length} items)`);
