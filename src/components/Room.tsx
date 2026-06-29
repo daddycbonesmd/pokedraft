@@ -21,6 +21,23 @@ const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 const moveTitle = (mv: string, info?: { t: string; p: number | null; c: string; d: string }) =>
   info ? [cap(info.t), cap(info.c), info.p ? `${info.p} BP` : null].filter(Boolean).join(" · ") + (info.d ? ` — ${info.d}` : "") : mv;
 
+// A type-coloured move chip with a hover card showing its description.
+function MoveChip({ name, info }: { name: string; info?: { t: string; p: number | null; c: string; d: string } }) {
+  return (
+    <span className="group relative cursor-help text-xs font-semibold rounded px-2 py-0.5 text-white"
+      title={moveTitle(name, info)} style={{ background: TYPE_COLORS[info?.t ?? ""] ?? "var(--ink-soft)" }}>
+      {name}
+      {info && (
+        <span className="pointer-events-none absolute z-30 left-0 bottom-full mb-1 hidden group-hover:block w-56 rounded-md p-2 shadow-xl text-left normal-case font-normal"
+          style={{ background: "var(--ink)", color: "var(--paper)" }}>
+          <b className="font-bold">{name}</b> · {cap(info.t)} · {cap(info.c)}{info.p ? ` · ${info.p} BP` : ""}
+          {info.d && <span className="block mt-1 opacity-90">{info.d}</span>}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function TypeEffect({ types }: { types: string[] }) {
   const dp = defenseProfile(types);
   const chip = (t: string, suffix = "") => (
@@ -633,8 +650,7 @@ export default function Room({ code }: { code: string }) {
                   {(moves.byMon[offer.id]?.length ?? 0) > 0 && (
                     <div className="mt-2.5 flex flex-wrap gap-1.5">
                       {moves.byMon[offer.id].map((mv) => (
-                        <span key={mv} title={moveTitle(mv, moves.info[mv])} className="cursor-help text-xs font-semibold rounded px-2 py-0.5 text-white"
-                          style={{ background: TYPE_COLORS[moves.info[mv]?.t ?? ""] ?? "var(--ink-soft)" }}>{mv}</span>
+                        <MoveChip key={mv} name={mv} info={moves.info[mv]} />
                       ))}
                     </div>
                   )}
@@ -775,11 +791,7 @@ export default function Room({ code }: { code: string }) {
                 {(moves.byMon[currentMon.id]?.length ?? 0) > 0 ? (
                   <div className="flex flex-wrap gap-1.5 mt-1.5">
                     {moves.byMon[currentMon.id].map((mv) => (
-                      <span key={mv} title={moveTitle(mv, moves.info[mv])}
-                        className="cursor-help text-xs font-semibold rounded px-2 py-0.5 text-white"
-                        style={{ background: TYPE_COLORS[moves.info[mv]?.t ?? ""] ?? "var(--ink-soft)" }}>
-                        {mv}
-                      </span>
+                      <MoveChip key={mv} name={mv} info={moves.info[mv]} />
                     ))}
                     <p className="text-[11px] text-ink-soft mt-1 w-full">Hover a move to read it.</p>
                   </div>

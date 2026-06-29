@@ -17,6 +17,22 @@ import {
   type Mon,
 } from "@/lib/mock";
 
+function MoveChip({ name, info }: { name: string; info?: { t: string; p: number | null; c: string; d: string } }) {
+  return (
+    <span className="group relative cursor-help text-xs font-semibold rounded px-2 py-0.5 text-white"
+      title={moveTitle(name, info)} style={{ background: TYPE_COLORS[info?.t ?? ""] ?? "var(--ink-soft)" }}>
+      {name}
+      {info && (
+        <span className="pointer-events-none absolute z-30 left-0 bottom-full mb-1 hidden group-hover:block w-56 rounded-md p-2 shadow-xl text-left normal-case font-normal"
+          style={{ background: "var(--ink)", color: "var(--paper)" }}>
+          <b className="font-bold">{name}</b> · {cap(info.t)} · {cap(info.c)}{info.p ? ` · ${info.p} BP` : ""}
+          {info.d && <span className="block mt-1 opacity-90">{info.d}</span>}
+        </span>
+      )}
+    </span>
+  );
+}
+
 type BidLog = { coachId: string; amount: number; key: number };
 
 // Every Pokémon opens at 1. Coaches raise by whatever step they like.
@@ -160,11 +176,7 @@ export default function AuctionDemo() {
                       <span className="font-semibold text-ink">Notable moves</span>
                       <div className="flex flex-wrap gap-1.5 mt-1">
                         {moves.byMon[current.id].map((mv) => (
-                          <span key={mv} title={moveTitle(mv, moves.info[mv])}
-                            className="cursor-help text-xs font-semibold rounded px-2 py-0.5 text-white"
-                            style={{ background: TYPE_COLORS[moves.info[mv]?.t ?? ""] ?? "var(--ink-soft)" }}>
-                            {mv}
-                          </span>
+                          <MoveChip key={mv} name={mv} info={moves.info[mv]} />
                         ))}
                       </div>
                     </div>
