@@ -57,6 +57,19 @@ const TYPE_MATCHUPS: Record<string, { weak: string[]; resist: string[]; immune: 
   fairy: { weak: ["fighting", "dragon", "dark"], resist: ["fire", "poison", "steel"], immune: [] },
 };
 
+// Offensive multiplier of an attacking type against a defender's type combo
+// (0 = immune, 0.25/0.5 = resisted, 2/4 = super effective). Case-insensitive.
+export function typeEffectiveness(attackType: string, defTypes: string[]): number {
+  const mt = TYPE_MATCHUPS[attackType.toLowerCase()];
+  if (!mt) return 1;
+  let x = 1;
+  for (const d of defTypes) {
+    const def = d.toLowerCase();
+    x *= mt.immune.includes(def) ? 0 : mt.weak.includes(def) ? 2 : mt.resist.includes(def) ? 0.5 : 1;
+  }
+  return x;
+}
+
 export type DefenseProfile = { weak: { t: string; x: number }[]; resist: { t: string; x: number }[]; immune: string[] };
 
 // Defensive matchups for a Pokémon's type combo: what hits it hard, what it shrugs off, what can't touch it.

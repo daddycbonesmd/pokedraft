@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Sprites } from "@pkmn/img";
-import { TYPE_COLORS } from "@/lib/pokedex";
+import { TYPE_COLORS, typeEffectiveness, loadPokedex, type PokeMon } from "@/lib/pokedex";
 import {
   engineFormat, getBattle, getBattleChoices, getLeagueById, getIdentity,
   subscribeBattle, submitChoice, finishBattle, reportMatchResult,
@@ -15,7 +15,22 @@ import {
 
 const NEED_TARGET = new Set(["normal", "any", "adjacentFoe"]);
 type MoveInfo = { name: string; type: string; cat: "Physical" | "Special" | "Status"; bp: number; acc: number; pp: number; pr: number; target: string; desc: string };
+type FoeInfo = { species: string; types: string[]; fainted: boolean } | null;
 const CAT_ICON: Record<string, string> = { Physical: "●", Special: "◆", Status: "○" };
+const STAT_ORDER = ["hp", "atk", "def", "spa", "spd", "spe"] as const;
+const STAT_SHORT: Record<string, string> = { hp: "HP", atk: "Atk", def: "Def", spa: "SpA", spd: "SpD", spe: "Spe", accuracy: "Acc", evasion: "Eva" };
+const toID = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+// Speed at level for the extreme spreads — slowest (0 IV/EV, −nature) to fastest
+// (31 IV / 252 EV, +nature) — so a hovered foe shows a believable speed window.
+function speedRange(base: number, level: number): [number, number] {
+  const calc = (iv: number, ev: number, nat: number) =>
+    Math.floor((Math.floor(((2 * base + iv + Math.floor(ev / 4)) * level) / 100) + 5) * nat);
+  return [calc(0, 0, 0.9), calc(31, 252, 1.1)];
+}
+const EFF_LABEL = (x: number) => (x === 0 ? "No effect" : x >= 4 ? "4× super effective" : x > 1 ? "2× super effective" : x <= 0.25 ? "¼× resisted" : x < 1 ? "½× resisted" : "1× neutral");
+const EFF_COLOR = (x: number) => (x === 0 ? "#6b6b6b" : x > 1 ? "#d9594c" : x < 1 ? "#4f8fd6" : "#7a7a7a");
+const EFF_TEXT = (x: number) => (x === 0 ? "0×" : x === 4 ? "4×" : x === 2 ? "2×" : x === 0.5 ? "½×" : x === 0.25 ? "¼×" : "1×");
 type SlotChoice =
   | { kind: "move"; index: number; moveTarget: string; needTarget: boolean }
   | { kind: "switch"; index: number };
@@ -34,9 +49,17 @@ export default function Battle({ id }: { id: string }) {
   const prevChoiceLen = useRef(0);
   const [attackers, setAttackers] = useState<Set<string>>(new Set());
   const [movedex, setMovedex] = useState<Record<string, MoveInfo>>({});
+  const [dex, setDex] = useState<Map<string, PokeMon>>(new Map());
   const prevLogLen = useRef(0);
 
   useEffect(() => { fetch("/movedex.json").then((r) => r.json()).then(setMovedex).catch(() => {}); }, []);
+  useEffect(() => {
+    loadPokedex().then((list) => {
+      const m = new Map<string, PokeMon>();
+      for (const p of list) { m.set(toID(p.name), p); m.set(toID(p.display), p); }
+      setDex(m);
+    }).catch(() => {});
+  }, []);
   // Re-sync shortly after our own writes — realtime can race read-after-write,
   // which otherwise leaves the AI (or our view) stuck on a stale replay.
   const scheduleSync = () => setTimeout(() => runRef.current(), 500);
@@ -163,6 +186,11 @@ export default function Battle({ id }: { id: string }) {
     .filter((p) => !p.active && !p.condition.includes("fnt"));
   const hasBench = benched.length > 0;
 
+  // Live opponents (species + defending types) for the move-effectiveness preview.
+  const foeInfos: FoeInfo[] = snap.far.active.map((f) =>
+    f ? { species: f.species, types: dex.get(toID(f.species))?.types ?? [], fainted: f.fainted } : null,
+  );
+
   // What does each active slot need from the player this request?
   //  • "switch" — a fainted slot with replacements waiting (forceSwitch + bench)
   //  • "move"   — a living active Pokémon choosing an action
@@ -253,8 +281,9 @@ export default function Battle({ id }: { id: string }) {
         </div>
       </div>
 
-      {/* Field — HP plates in the corners opposite each side's Pokémon */}
-      <div className="relative rounded-xl overflow-hidden shadow-inner"
+      {/* Field — HP plates in the corners opposite each side's Pokémon.
+          overflow-visible so hover tooltips can spill past the arena edge. */}
+      <div className="relative rounded-xl shadow-inner"
         style={{ height: 320, background: "linear-gradient(#add8ee 0%, #c4e3f2 50%, #cfe8a6 50%, #aed98c 100%)" }}>
         {/* field conditions */}
         {(snap.field.weather || snap.field.terrain || snap.field.trickRoom) && (
@@ -268,14 +297,16 @@ export default function Battle({ id }: { id: string }) {
         <div className="absolute top-3 left-3 z-10"><HpPlate side={snap.far} align="left" /></div>
         <div className="absolute top-6 right-6 left-[40%] flex justify-center gap-5 items-end">
           {(snap.far.active.filter(Boolean) as NonNullable<Slot>[]).map((m, i) => (
-            <BattleMon key={`far-${i}`} mon={m} facing="front" attacking={attackers.has(m.species)} />
+            <BattleMon key={`far-${i}`} mon={m} facing="front" attacking={attackers.has(m.species)}
+              tip={<MonTooltip mon={m} info={dex.get(toID(m.species))} revealed={snap.farRevealed[m.species]} side="foe" />} />
           ))}
         </div>
         {/* you — HP bottom-right, sprites lower center-left */}
         <div className="absolute bottom-3 right-3 z-10"><HpPlate side={snap.near} align="right" /></div>
         <div className="absolute bottom-5 left-6 right-[40%] flex justify-center gap-5 items-end">
           {(snap.near.active.filter(Boolean) as NonNullable<Slot>[]).map((m, i) => (
-            <BattleMon key={`near-${i}`} mon={m} facing="back" attacking={attackers.has(m.species)} />
+            <BattleMon key={`near-${i}`} mon={m} facing="back" attacking={attackers.has(m.species)}
+              tip={<MonTooltip mon={m} info={dex.get(toID(m.species))} revealed={snap.nearRevealed[m.species]} side="ally" />} />
           ))}
         </div>
       </div>
@@ -299,7 +330,7 @@ export default function Battle({ id }: { id: string }) {
               {activeSlots.map((i) => (
                 <SlotChooser
                   key={i} slot={i} req={req!} benched={benched} chosen={pending[i]} gimmick={gimmick[i]}
-                  foes={snap.far.active} movedex={movedex} onMove={(mi, t) => chooseMove(i, mi, t)} onTarget={(fi) => chooseTarget(i, fi)}
+                  foes={snap.far.active} foeInfos={foeInfos} movedex={movedex} onMove={(mi, t) => chooseMove(i, mi, t)} onTarget={(fi) => chooseTarget(i, fi)}
                   onSwitch={(pi) => chooseSwitch(i, pi)}
                   onGimmick={(g) => setGimmick((p) => { const n = { ...p }; if (g) n[i] = g; else delete n[i]; return n; })}
                 />
@@ -331,7 +362,7 @@ function FieldChip({ children }: { children: React.ReactNode }) {
   return <span className="text-[10px] font-bold rounded-full px-2 py-0.5 bg-ink/80 text-paper shadow">{children}</span>;
 }
 
-function BattleMon({ mon, facing, attacking }: { mon: NonNullable<Slot>; facing: "front" | "back"; attacking: boolean }) {
+function BattleMon({ mon, facing, attacking, tip }: { mon: NonNullable<Slot>; facing: "front" | "back"; attacking: boolean; tip?: React.ReactNode }) {
   const url = useMemo(
     () => (Sprites.getPokemon(mon.species, { gen: "ani", side: facing === "front" ? "p2" : "p1" }) as { url: string }).url,
     [mon.species, facing],
@@ -356,9 +387,23 @@ function BattleMon({ mon, facing, attacking }: { mon: NonNullable<Slot>; facing:
     return () => clearTimeout(t);
   }, [attacking, facing, mon.fainted]);
 
+  const boosts = Object.entries(mon.boosts ?? {}).filter(([, v]) => v !== 0);
+
   return (
-    <div className={`bm-wrap ${mon.fainted ? "bm-faint" : ""} ${motion}`}
-      style={{ width: 96, height: 104, display: "grid", placeItems: "end center" }}>
+    <div className="relative group" style={{ width: 96 }}>
+      {/* Persistent stat-stage notifier — always shows current boosts on the mon. */}
+      {boosts.length > 0 && !mon.fainted && (
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-0.5 pointer-events-none">
+          {boosts.map(([k, v]) => (
+            <span key={k} className="text-[8px] font-black rounded px-1 leading-snug shadow text-white whitespace-nowrap"
+              style={{ background: v > 0 ? "#2f9e54" : "#d24a3d" }}>
+              {STAT_SHORT[k] ?? k} {v > 0 ? "+" : ""}{v}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className={`bm-wrap ${mon.fainted ? "bm-faint" : ""} ${motion}`}
+        style={{ width: 96, height: 104, display: "grid", placeItems: "end center" }}>
       {/* key by species → a switch or Mega Evolution remounts and replays the entrance */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img key={mon.species} src={url} alt={mon.species} draggable={false} className="bm" />
@@ -375,6 +420,52 @@ function BattleMon({ mon, facing, attacking }: { mon: NonNullable<Slot>; facing:
         @keyframes bmAtkFront { 0%,100% { transform: translate(0,0); } 45% { transform: translate(0,18px) scale(1.07); } }
         @keyframes bmFaint { to { opacity: 0; transform: translateY(26px) scale(0.85); } }
       `}</style>
+      </div>
+      {/* Hover dossier: types, base stats, speed window, scouted moves. */}
+      {tip && (
+        <div className={`pointer-events-none absolute z-40 left-1/2 -translate-x-1/2 hidden group-hover:block ${facing === "front" ? "top-full mt-1" : "bottom-full mb-1"}`}>
+          {tip}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MonTooltip({ mon, info, revealed, side }: { mon: NonNullable<Slot>; info?: PokeMon; revealed?: string[]; side: "foe" | "ally" }) {
+  const [spMin, spMax] = info ? speedRange(info.stats.spe, mon.level) : [0, 0];
+  return (
+    <div className="w-52 rounded-lg p-2.5 shadow-xl text-left text-[11px]" style={{ background: "var(--ink)", color: "var(--paper)" }}>
+      <div className="flex items-center justify-between mb-1">
+        <b className="text-xs">{mon.species}</b>
+        <span className="opacity-70">Lv{mon.level}{mon.fainted ? " · fainted" : ""}</span>
+      </div>
+      <div className="flex flex-wrap gap-1 mb-1.5">
+        {(info?.types ?? []).map((t) => (
+          <span key={t} className="text-[9px] font-bold uppercase rounded px-1.5 py-0.5 text-white" style={{ background: TYPE_COLORS[t.toLowerCase()] ?? "#777" }}>{t}</span>
+        ))}
+        {mon.tera && <span className="text-[9px] font-bold uppercase rounded px-1.5 py-0.5 text-white" style={{ background: TYPE_COLORS[mon.tera.toLowerCase()] ?? "#777" }}>★ {mon.tera}</span>}
+      </div>
+      {info ? (
+        <>
+          <div className="grid grid-cols-6 gap-1 mb-1.5">
+            {STAT_ORDER.map((s) => (
+              <div key={s} className="text-center">
+                <div className="opacity-60 text-[8px] font-bold">{STAT_SHORT[s]}</div>
+                <div className="font-mono font-bold text-[10px]">{info.stats[s]}</div>
+              </div>
+            ))}
+          </div>
+          <div className="opacity-90">Speed <b>{spMin}–{spMax}</b> <span className="opacity-60">(×1.5 scarf → {Math.floor(spMax * 1.5)})</span></div>
+        </>
+      ) : <div className="opacity-60">No dex data.</div>}
+      {revealed && revealed.length > 0 && (
+        <div className="mt-1.5 pt-1.5 border-t border-white/20">
+          <div className="opacity-60 text-[9px] font-bold uppercase mb-0.5">{side === "foe" ? "Scouted moves" : "Moves revealed"}</div>
+          <div className="flex flex-wrap gap-1">
+            {revealed.map((mv) => <span key={mv} className="rounded bg-white/15 px-1.5 py-0.5">{mv}</span>)}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -410,15 +501,16 @@ const hpFromCondition = (c: string) => {
   return c?.includes("fnt") ? 0 : max ? Math.round((cur / max) * 100) : 100;
 };
 
-function SlotChooser({ slot, req, benched, chosen, gimmick, foes, movedex, onMove, onTarget, onSwitch, onGimmick }: {
+function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, movedex, onMove, onTarget, onSwitch, onGimmick }: {
   slot: number; req: Request; benched: { details: string; condition: string; party: number }[]; chosen?: SlotChoice;
-  gimmick?: "mega" | "terastallize"; foes: Slot[]; movedex: Record<string, MoveInfo>;
+  gimmick?: "mega" | "terastallize"; foes: Slot[]; foeInfos: FoeInfo[]; movedex: Record<string, MoveInfo>;
   onMove: (moveIndex: number, target: string) => void; onTarget: (foeIndex: number) => void;
   onSwitch: (partyIndex: number) => void; onGimmick: (g?: "mega" | "terastallize") => void;
 }) {
   const active = req.active?.[slot];
   const forceSwitch = req.forceSwitch?.[slot];
   const pickingTarget = chosen?.kind === "move" && chosen.needTarget && !chosen.moveTarget;
+  const liveFoes = foeInfos.filter((f): f is NonNullable<FoeInfo> => Boolean(f && !f.fainted && f.types.length));
   return (
     <div className="border border-dashed border-paper-edge rounded p-2">
       {forceSwitch && <div className="text-[11px] font-bold text-coral mb-1.5">A Pokémon fainted — send in a replacement:</div>}
@@ -460,6 +552,10 @@ function SlotChooser({ slot, req, benched, chosen, gimmick, foes, movedex, onMov
             const disabled = mv.disabled || mv.pp === 0;
             const sel = chosen?.kind === "move" && chosen.index === j + 1;
             const color = info ? (TYPE_COLORS[info.type.toLowerCase()] ?? "#777") : "#777";
+            // Effectiveness preview: only damaging moves have a type matchup worth
+            // showing (status moves like Protect/Tailwind don't "hit" a type).
+            const showEff = info && info.cat !== "Status" && liveFoes.length > 0;
+            const effs = showEff ? liveFoes.map((f) => ({ f, x: typeEffectiveness(info!.type, f.types) })) : [];
             return (
               <button key={j} disabled={disabled} onClick={() => onMove(j + 1, mv.target)}
                 title={info ? `${mv.move} — ${info.type} ${info.cat}\nPower ${info.bp || "—"} · Acc ${info.acc || "—"} · ${mv.pp}/${mv.maxpp} PP\n${info.desc}` : mv.move}
@@ -470,12 +566,31 @@ function SlotChooser({ slot, req, benched, chosen, gimmick, foes, movedex, onMov
                   <span className="text-[11px] opacity-90">{CAT_ICON[info?.cat ?? "Status"]}</span>
                 </div>
                 <div className="text-[9px] opacity-90">{info?.type ?? ""} · {mv.pp}/{mv.maxpp} PP</div>
+                {effs.length > 0 && (
+                  <div className="flex flex-wrap gap-0.5 mt-1">
+                    {effs.map(({ f, x }, k) => (
+                      <span key={k} className="text-[8px] font-black rounded px-1 leading-tight text-white whitespace-nowrap"
+                        style={{ background: EFF_COLOR(x) }}>
+                        {EFF_TEXT(x)}{liveFoes.length > 1 ? ` ${f.species.slice(0, 4)}` : ""}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 {info && (
                   <span className="pointer-events-none absolute z-30 left-0 bottom-full mb-1 hidden group-hover:block w-56 rounded-md p-2 shadow-xl text-left"
                     style={{ background: "var(--ink)", color: "var(--paper)" }}>
                     <b>{mv.move}</b> · {info.type} · {info.cat}<br />
                     Power {info.bp || "—"} · Acc {info.acc || "—"} · {mv.pp}/{mv.maxpp} PP{info.pr ? ` · Priority ${info.pr > 0 ? "+" : ""}${info.pr}` : ""}
                     <span className="block mt-1 opacity-90">{info.desc}</span>
+                    {effs.length > 0 && (
+                      <span className="block mt-1 pt-1 border-t border-white/20">
+                        {effs.map(({ f, x }, k) => (
+                          <span key={k} className="block" style={{ color: EFF_COLOR(x) === "#7a7a7a" ? undefined : EFF_COLOR(x) }}>
+                            vs {f.species}: {EFF_LABEL(x)}
+                          </span>
+                        ))}
+                      </span>
+                    )}
                   </span>
                 )}
               </button>

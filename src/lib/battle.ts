@@ -29,7 +29,15 @@ export type Request = {
   side?: { name: string; pokemon: { ident: string; details: string; condition: string; active: boolean }[] };
 };
 
-export type Slot = { species: string; hpPct: number; fainted: boolean; status: string; tera: string } | null;
+export type Slot = {
+  species: string;
+  level: number;
+  hpPct: number;
+  fainted: boolean;
+  status: string;
+  tera: string;
+  boosts: Record<string, number>; // only non-zero stat stages (atk/def/spa/spd/spe/accuracy/evasion)
+} | null;
 export type SideView = { name: string; active: Slot[] };
 export type FieldState = { weather: string; terrain: string; trickRoom: boolean };
 export type BattleSnapshot = {
@@ -43,6 +51,8 @@ export type BattleSnapshot = {
   far: SideView;           // opponent
   field: FieldState;       // weather / terrain / Trick Room
   log: string[];           // human-readable events
+  nearRevealed: Record<string, string[]>; // species → moves the viewer's team has been seen using
+  farRevealed: Record<string, string[]>;  // species → moves the opponent has been seen using
 };
 
 const WEATHER: Record<string, string> = {
@@ -125,12 +135,32 @@ export function replay(
     name: battle.sides[idx].name,
     active: battle.sides[idx].active.map((mon) => mon ? {
       species: mon.species.name,
+      level: mon.level,
       hpPct: mon.maxhp ? Math.max(0, Math.round((mon.hp / mon.maxhp) * 100)) : (mon.fainted ? 0 : 100),
       fainted: mon.fainted,
       status: mon.status || "",
       tera: (mon as unknown as { terastallized?: string }).terastallized || "",
+      boosts: Object.fromEntries(
+        Object.entries((mon as unknown as { boosts?: Record<string, number> }).boosts ?? {}).filter(([, v]) => v !== 0),
+      ),
     } : null),
   });
+
+  // Track which moves each side has been *seen* using, so the UI can reveal an
+  // opponent's known moves on hover (information you'd legitimately have).
+  const revealed: Record<"p1" | "p2", Record<string, Set<string>>> = { p1: {}, p2: {} };
+  for (const line of battle.log) {
+    if (!line.startsWith("|move|")) continue;
+    const parts = line.split("|"); // |move|p1a: Garchomp|Earthquake|...
+    const side = parts[2]?.slice(0, 2);
+    const species = nick(parts[2] ?? "");
+    const move = parts[3];
+    if ((side === "p1" || side === "p2") && species && move) {
+      (revealed[side][species] ??= new Set()).add(move);
+    }
+  }
+  const toArr = (m: Record<string, Set<string>>) =>
+    Object.fromEntries(Object.entries(m).map(([k, v]) => [k, [...v]]));
 
   const nearIdx = viewer === "p2" ? 1 : 0;
   const vSide = viewer === "spectator" ? null : battle.sides[nearIdx];
@@ -153,6 +183,8 @@ export function replay(
       trickRoom: Boolean(f.pseudoWeather?.trickroom),
     },
     log: readableLog(battle.log),
+    nearRevealed: toArr(revealed[viewer === "p2" ? "p2" : "p1"]),
+    farRevealed: toArr(revealed[viewer === "p2" ? "p1" : "p2"]),
   };
 }
 
