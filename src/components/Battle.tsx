@@ -28,6 +28,8 @@ export default function Battle({ id }: { id: string }) {
   const [code, setCode] = useState("");
   const reported = useRef(false);
   const runRef = useRef<() => void>(() => {});
+  const [attackers, setAttackers] = useState<Set<string>>(new Set());
+  const prevLogLen = useRef(0);
   // Re-sync shortly after our own writes — realtime can race read-after-write,
   // which otherwise leaves the AI (or our view) stuck on a stale replay.
   const scheduleSync = () => setTimeout(() => runRef.current(), 500);
@@ -105,6 +107,20 @@ export default function Battle({ id }: { id: string }) {
     return () => clearInterval(iv);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [battle?.id, battle?.p2_coach_id, viewer]);
+
+  // Flag whoever just used a move so their sprite lunges (attack animation).
+  // Set to the fresh movers each snapshot (empty when no new moves) so `attacking`
+  // toggles back off between turns — the lunge re-fires on every turn's false→true.
+  useEffect(() => {
+    if (!snap) return;
+    const fresh = snap.log.slice(prevLogLen.current);
+    const first = prevLogLen.current === 0;
+    prevLogLen.current = snap.log.length;
+    if (first) return; // don't replay the whole history on load
+    const movers = new Set<string>();
+    for (const l of fresh) { const m = l.match(/^(.+?) used /); if (m) movers.add(m[1].trim()); }
+    setAttackers((prev) => (prev.size === 0 && movers.size === 0 ? prev : movers));
+  }, [snap]);
 
   if (fatal) return <Centered>{fatal} <Link href="/" className="text-coral underline">Home</Link></Centered>;
   if (!snap || !battle) return <Centered><span className="hand text-3xl text-coral">entering the battle…</span></Centered>;
@@ -185,18 +201,22 @@ export default function Battle({ id }: { id: string }) {
         </div>
       </div>
 
-      {/* Field — opponent up-right, you down-left (Showdown layout) */}
+      {/* Field — HP plates in the corners opposite each side's Pokémon */}
       <div className="relative rounded-xl overflow-hidden shadow-inner"
-        style={{ height: 300, background: "linear-gradient(#add8ee 0%, #c4e3f2 50%, #cfe8a6 50%, #aed98c 100%)" }}>
-        {/* far side */}
-        <div className="absolute top-3 right-4"><HpPlate side={snap.far} align="right" /></div>
-        <div className="absolute top-10 right-6 flex gap-3 items-end">
-          {(snap.far.active.filter(Boolean) as NonNullable<Slot>[]).map((m, i) => <BattleMon key={`far-${i}`} mon={m} facing="front" />)}
+        style={{ height: 320, background: "linear-gradient(#add8ee 0%, #c4e3f2 50%, #cfe8a6 50%, #aed98c 100%)" }}>
+        {/* opponent — HP top-left, sprites upper center-right */}
+        <div className="absolute top-3 left-3 z-10"><HpPlate side={snap.far} align="left" /></div>
+        <div className="absolute top-6 right-6 left-[40%] flex justify-center gap-5 items-end">
+          {(snap.far.active.filter(Boolean) as NonNullable<Slot>[]).map((m, i) => (
+            <BattleMon key={`far-${i}`} mon={m} facing="front" attacking={attackers.has(m.species)} />
+          ))}
         </div>
-        {/* near side */}
-        <div className="absolute bottom-3 left-4"><HpPlate side={snap.near} align="left" /></div>
-        <div className="absolute bottom-8 left-6 flex gap-3 items-end">
-          {(snap.near.active.filter(Boolean) as NonNullable<Slot>[]).map((m, i) => <BattleMon key={`near-${i}`} mon={m} facing="back" />)}
+        {/* you — HP bottom-right, sprites lower center-left */}
+        <div className="absolute bottom-3 right-3 z-10"><HpPlate side={snap.near} align="right" /></div>
+        <div className="absolute bottom-5 left-6 right-[40%] flex justify-center gap-5 items-end">
+          {(snap.near.active.filter(Boolean) as NonNullable<Slot>[]).map((m, i) => (
+            <BattleMon key={`near-${i}`} mon={m} facing="back" attacking={attackers.has(m.species)} />
+          ))}
         </div>
       </div>
 
@@ -246,37 +266,49 @@ export default function Battle({ id }: { id: string }) {
 
 const hpColor = (p: number) => (p > 50 ? "#3fa84b" : p > 20 ? "#dca23e" : "#d9594c");
 
-function BattleMon({ mon, facing }: { mon: NonNullable<Slot>; facing: "front" | "back" }) {
+function BattleMon({ mon, facing, attacking }: { mon: NonNullable<Slot>; facing: "front" | "back"; attacking: boolean }) {
   const url = useMemo(
     () => (Sprites.getPokemon(mon.species, { gen: "ani", side: facing === "front" ? "p2" : "p1" }) as { url: string }).url,
     [mon.species, facing],
   );
   const prevHp = useRef(mon.hpPct);
-  const [hit, setHit] = useState(false);
+  // Transient motion applied to the WRAPPER, so it never conflicts with the
+  // img's entrance animation: "hit" (took damage) or "atk" (used a move).
+  const [motion, setMotion] = useState("");
   useEffect(() => {
     if (mon.hpPct < prevHp.current && !mon.fainted) {
-      setHit(true);
-      const t = setTimeout(() => setHit(false), 450);
+      setMotion("bm-hit");
+      const t = setTimeout(() => setMotion(""), 450);
       prevHp.current = mon.hpPct;
       return () => clearTimeout(t);
     }
     prevHp.current = mon.hpPct;
   }, [mon.hpPct, mon.fainted]);
+  useEffect(() => {
+    if (!attacking || mon.fainted) return;
+    setMotion(facing === "back" ? "bm-atk-back" : "bm-atk-front");
+    const t = setTimeout(() => setMotion(""), 500);
+    return () => clearTimeout(t);
+  }, [attacking, facing, mon.fainted]);
 
   return (
-    <div style={{ width: 96, height: 100 }} className="grid place-items-end justify-center">
+    <div className={`bm-wrap ${mon.fainted ? "bm-faint" : ""} ${motion}`}
+      style={{ width: 96, height: 104, display: "grid", placeItems: "end center" }}>
       {/* key by species → a switch or Mega Evolution remounts and replays the entrance */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img key={mon.species} src={url} alt={mon.species} draggable={false}
-        className={`bm ${mon.fainted ? "bm-faint" : "bm-in"} ${hit ? "bm-hit" : ""}`} />
+      <img key={mon.species} src={url} alt={mon.species} draggable={false} className="bm" />
       <style jsx>{`
-        .bm { image-rendering: pixelated; max-height: 100px; max-width: 112px; transform-origin: bottom center; }
-        .bm-in { animation: bmIn 0.45s ease-out; }
+        .bm { image-rendering: pixelated; max-height: 104px; max-width: 116px; transform-origin: bottom center; animation: bmIn 0.45s ease-out; }
+        .bm-wrap { transform-origin: bottom center; }
         .bm-hit { animation: bmHit 0.45s ease-in-out; }
+        .bm-atk-back { animation: bmAtkBack 0.5s ease-out; }
+        .bm-atk-front { animation: bmAtkFront 0.5s ease-out; }
         .bm-faint { animation: bmFaint 0.6s ease-in forwards; }
         @keyframes bmIn { from { opacity: 0; transform: translateY(-14px) scale(0.7); } to { opacity: 1; transform: none; } }
-        @keyframes bmHit { 0%,100% { transform: translateX(0); filter: none; } 25% { transform: translateX(-6px); filter: brightness(2.2); } 50% { transform: translateX(6px); } 75% { transform: translateX(-4px); } }
-        @keyframes bmFaint { to { opacity: 0; transform: translateY(24px) scale(0.85); } }
+        @keyframes bmHit { 0%,100% { transform: translateX(0); filter: none; } 25% { transform: translateX(-6px); filter: brightness(2.4) saturate(0.5); } 50% { transform: translateX(6px); } 75% { transform: translateX(-4px); } }
+        @keyframes bmAtkBack { 0%,100% { transform: translate(0,0); } 45% { transform: translate(0,-18px) scale(1.07); } }
+        @keyframes bmAtkFront { 0%,100% { transform: translate(0,0); } 45% { transform: translate(0,18px) scale(1.07); } }
+        @keyframes bmFaint { to { opacity: 0; transform: translateY(26px) scale(0.85); } }
       `}</style>
     </div>
   );
