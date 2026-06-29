@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Sprites } from "@pkmn/img";
+import { TYPE_COLORS } from "@/lib/pokedex";
 import {
   engineFormat, getBattle, getBattleChoices, getLeagueById, getIdentity,
   subscribeBattle, submitChoice, finishBattle, reportMatchResult,
@@ -13,6 +14,8 @@ import {
 } from "@/lib/battle";
 
 const NEED_TARGET = new Set(["normal", "any", "adjacentFoe"]);
+type MoveInfo = { name: string; type: string; cat: "Physical" | "Special" | "Status"; bp: number; acc: number; pp: number; pr: number; target: string; desc: string };
+const CAT_ICON: Record<string, string> = { Physical: "●", Special: "◆", Status: "○" };
 type SlotChoice =
   | { kind: "move"; index: number; moveTarget: string; needTarget: boolean }
   | { kind: "switch"; index: number };
@@ -29,7 +32,10 @@ export default function Battle({ id }: { id: string }) {
   const reported = useRef(false);
   const runRef = useRef<() => void>(() => {});
   const [attackers, setAttackers] = useState<Set<string>>(new Set());
+  const [movedex, setMovedex] = useState<Record<string, MoveInfo>>({});
   const prevLogLen = useRef(0);
+
+  useEffect(() => { fetch("/movedex.json").then((r) => r.json()).then(setMovedex).catch(() => {}); }, []);
   // Re-sync shortly after our own writes — realtime can race read-after-write,
   // which otherwise leaves the AI (or our view) stuck on a stale replay.
   const scheduleSync = () => setTimeout(() => runRef.current(), 500);
@@ -204,6 +210,14 @@ export default function Battle({ id }: { id: string }) {
       {/* Field — HP plates in the corners opposite each side's Pokémon */}
       <div className="relative rounded-xl overflow-hidden shadow-inner"
         style={{ height: 320, background: "linear-gradient(#add8ee 0%, #c4e3f2 50%, #cfe8a6 50%, #aed98c 100%)" }}>
+        {/* field conditions */}
+        {(snap.field.weather || snap.field.terrain || snap.field.trickRoom) && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 flex gap-1 z-20">
+            {snap.field.weather && <FieldChip>{snap.field.weather}</FieldChip>}
+            {snap.field.terrain && <FieldChip>{snap.field.terrain}</FieldChip>}
+            {snap.field.trickRoom && <FieldChip>Trick Room</FieldChip>}
+          </div>
+        )}
         {/* opponent — HP top-left, sprites upper center-right */}
         <div className="absolute top-3 left-3 z-10"><HpPlate side={snap.far} align="left" /></div>
         <div className="absolute top-6 right-6 left-[40%] flex justify-center gap-5 items-end">
@@ -239,7 +253,7 @@ export default function Battle({ id }: { id: string }) {
               {activeSlots.map((i) => (
                 <SlotChooser
                   key={i} slot={i} req={req!} benched={benched} chosen={pending[i]} gimmick={gimmick[i]}
-                  foes={snap.far.active} onMove={(mi, t) => chooseMove(i, mi, t)} onTarget={(fi) => chooseTarget(i, fi)}
+                  foes={snap.far.active} movedex={movedex} onMove={(mi, t) => chooseMove(i, mi, t)} onTarget={(fi) => chooseTarget(i, fi)}
                   onSwitch={(pi) => chooseSwitch(i, pi)}
                   onGimmick={(g) => setGimmick((p) => { const n = { ...p }; if (g) n[i] = g; else delete n[i]; return n; })}
                 />
@@ -265,6 +279,11 @@ export default function Battle({ id }: { id: string }) {
 }
 
 const hpColor = (p: number) => (p > 50 ? "#3fa84b" : p > 20 ? "#dca23e" : "#d9594c");
+const STATUS_COLOR: Record<string, string> = { brn: "#e0762f", par: "#d3aa2e", psn: "#9b5fb0", tox: "#9b5fb0", slp: "#8a8a8a", frz: "#5bb9d6" };
+
+function FieldChip({ children }: { children: React.ReactNode }) {
+  return <span className="text-[10px] font-bold rounded-full px-2 py-0.5 bg-ink/80 text-paper shadow">{children}</span>;
+}
 
 function BattleMon({ mon, facing, attacking }: { mon: NonNullable<Slot>; facing: "front" | "back"; attacking: boolean }) {
   const url = useMemo(
@@ -323,8 +342,12 @@ function HpPlate({ side, align }: { side: { name: string; active: Slot[] }; alig
       {mons.map((m, i) => (
         <div key={i} className="mb-1 last:mb-0">
           <div className="flex items-center gap-1 justify-between">
-            <span className="text-xs font-semibold truncate">{m.species}{m.status && <span className="ml-1 text-[9px] uppercase text-coral">{m.status}</span>}</span>
-            <span className="text-[10px] text-ink-soft">{m.fainted ? "fnt" : `${m.hpPct}%`}</span>
+            <span className="text-xs font-semibold truncate flex items-center gap-1 min-w-0">
+              <span className="truncate">{m.species}</span>
+              {m.status && <span className="text-[9px] uppercase font-bold rounded px-1 text-white shrink-0" style={{ background: STATUS_COLOR[m.status] ?? "#888" }}>{m.status}</span>}
+              {m.tera && <span className="text-[9px] uppercase font-bold rounded px-1 text-white shrink-0" style={{ background: TYPE_COLORS[m.tera.toLowerCase()] ?? "#777" }}>★{m.tera.slice(0, 3)}</span>}
+            </span>
+            <span className="text-[10px] text-ink-soft shrink-0">{m.fainted ? "fnt" : `${m.hpPct}%`}</span>
           </div>
           <div className="h-2 rounded bg-black/10 overflow-hidden">
             <div className="h-full rounded" style={{ width: `${m.hpPct}%`, background: hpColor(m.hpPct), transition: "width 0.6s ease" }} />
@@ -335,9 +358,15 @@ function HpPlate({ side, align }: { side: { name: string; active: Slot[] }; alig
   );
 }
 
-function SlotChooser({ slot, req, benched, chosen, gimmick, foes, onMove, onTarget, onSwitch, onGimmick }: {
-  slot: number; req: Request; benched: { details: string; party: number }[]; chosen?: SlotChoice;
-  gimmick?: "mega" | "terastallize"; foes: Slot[];
+const hpFromCondition = (c: string) => {
+  const [hp] = (c || "").split(" ");
+  const [cur, max] = hp.split("/").map(Number);
+  return c?.includes("fnt") ? 0 : max ? Math.round((cur / max) * 100) : 100;
+};
+
+function SlotChooser({ slot, req, benched, chosen, gimmick, foes, movedex, onMove, onTarget, onSwitch, onGimmick }: {
+  slot: number; req: Request; benched: { details: string; condition: string; party: number }[]; chosen?: SlotChoice;
+  gimmick?: "mega" | "terastallize"; foes: Slot[]; movedex: Record<string, MoveInfo>;
   onMove: (moveIndex: number, target: string) => void; onTarget: (foeIndex: number) => void;
   onSwitch: (partyIndex: number) => void; onGimmick: (g?: "mega" | "terastallize") => void;
 }) {
@@ -346,6 +375,7 @@ function SlotChooser({ slot, req, benched, chosen, gimmick, foes, onMove, onTarg
   const pickingTarget = chosen?.kind === "move" && chosen.needTarget && !chosen.moveTarget;
   return (
     <div className="border border-dashed border-paper-edge rounded p-2">
+      {forceSwitch && <div className="text-[11px] font-bold text-coral mb-1.5">A Pokémon fainted — send in a replacement:</div>}
       {pickingTarget && (
         <div className="mb-2">
           <div className="text-[11px] font-semibold text-ink-soft mb-1">Target which foe?</div>
@@ -380,13 +410,28 @@ function SlotChooser({ slot, req, benched, chosen, gimmick, foes, onMove, onTarg
       {!forceSwitch && active && (
         <div className="grid grid-cols-2 gap-1.5 mb-2">
           {active.moves.map((mv, j) => {
+            const info = movedex[mv.id];
             const disabled = mv.disabled || mv.pp === 0;
             const sel = chosen?.kind === "move" && chosen.index === j + 1;
+            const color = info ? (TYPE_COLORS[info.type.toLowerCase()] ?? "#777") : "#777";
             return (
               <button key={j} disabled={disabled} onClick={() => onMove(j + 1, mv.target)}
-                className="text-xs font-semibold rounded px-2 py-1.5 text-left disabled:opacity-30 transition"
-                style={{ background: sel ? "var(--coral)" : "rgba(0,0,0,0.05)", color: sel ? "white" : "inherit" }}>
-                {mv.move} <span className="opacity-60">{mv.pp}/{mv.maxpp}</span>
+                title={info ? `${mv.move} — ${info.type} ${info.cat}\nPower ${info.bp || "—"} · Acc ${info.acc || "—"} · ${mv.pp}/${mv.maxpp} PP\n${info.desc}` : mv.move}
+                className="group relative rounded px-2 py-1.5 text-left text-white disabled:opacity-40 transition"
+                style={{ background: color, boxShadow: sel ? "0 0 0 2.5px var(--ink)" : "inset 0 -2px 0 rgba(0,0,0,0.18)" }}>
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-xs font-bold leading-tight drop-shadow-sm">{mv.move}</span>
+                  <span className="text-[11px] opacity-90">{CAT_ICON[info?.cat ?? "Status"]}</span>
+                </div>
+                <div className="text-[9px] opacity-90">{info?.type ?? ""} · {mv.pp}/{mv.maxpp} PP</div>
+                {info && (
+                  <span className="pointer-events-none absolute z-30 left-0 bottom-full mb-1 hidden group-hover:block w-56 rounded-md p-2 shadow-xl text-left"
+                    style={{ background: "var(--ink)", color: "var(--paper)" }}>
+                    <b>{mv.move}</b> · {info.type} · {info.cat}<br />
+                    Power {info.bp || "—"} · Acc {info.acc || "—"} · {mv.pp}/{mv.maxpp} PP{info.pr ? ` · Priority ${info.pr > 0 ? "+" : ""}${info.pr}` : ""}
+                    <span className="block mt-1 opacity-90">{info.desc}</span>
+                  </span>
+                )}
               </button>
             );
           })}
@@ -397,9 +442,9 @@ function SlotChooser({ slot, req, benched, chosen, gimmick, foes, onMove, onTarg
           const sel = chosen?.kind === "switch" && chosen.index === b.party;
           return (
             <button key={b.party} onClick={() => onSwitch(b.party)}
-              className="text-[11px] rounded px-2 py-1 transition"
+              className="text-[11px] rounded px-2 py-1 transition flex items-center gap-1"
               style={{ background: sel ? "var(--pine,#2f8f83)" : "rgba(0,0,0,0.05)", color: sel ? "white" : "inherit" }}>
-              ⇄ {b.details.split(",")[0]}
+              ⇄ {b.details.split(",")[0]} <span className="opacity-60">{hpFromCondition(b.condition)}%</span>
             </button>
           );
         })}

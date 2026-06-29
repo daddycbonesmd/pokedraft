@@ -29,8 +29,9 @@ export type Request = {
   side?: { name: string; pokemon: { ident: string; details: string; condition: string; active: boolean }[] };
 };
 
-export type Slot = { species: string; hpPct: number; fainted: boolean; status: string } | null;
+export type Slot = { species: string; hpPct: number; fainted: boolean; status: string; tera: string } | null;
 export type SideView = { name: string; active: Slot[] };
+export type FieldState = { weather: string; terrain: string; trickRoom: boolean };
 export type BattleSnapshot = {
   turn: number;
   ended: boolean;
@@ -40,7 +41,19 @@ export type BattleSnapshot = {
   owes: boolean;           // whether the viewer must make a choice right now (authoritative)
   near: SideView;          // viewer's side
   far: SideView;           // opponent
+  field: FieldState;       // weather / terrain / Trick Room
   log: string[];           // human-readable events
+};
+
+const WEATHER: Record<string, string> = {
+  sunnyday: "Harsh Sunlight", raindance: "Rain", sandstorm: "Sandstorm", snowscape: "Snow", hail: "Hail",
+  desolateland: "Extreme Sun", primordialsea: "Heavy Rain", deltastream: "Strong Winds",
+};
+const TERRAIN: Record<string, string> = {
+  electricterrain: "Electric Terrain", grassyterrain: "Grassy Terrain", psychicterrain: "Psychic Terrain", mistyterrain: "Misty Terrain",
+};
+const STAT_NAME: Record<string, string> = {
+  atk: "Attack", def: "Defense", spa: "Sp. Atk", spd: "Sp. Def", spe: "Speed", accuracy: "accuracy", evasion: "evasion",
 };
 
 const STATUS_TEXT: Record<string, string> = {
@@ -48,22 +61,46 @@ const STATUS_TEXT: Record<string, string> = {
 };
 const nick = (idAndName: string) => idAndName.split(": ")[1] ?? idAndName;
 
-// Turn the omniscient protocol log into a few human-readable lines.
+const toID = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+const fieldName = (s: string) => s.replace(/^.*?: /, "");
+
+// Turn the omniscient protocol log into human-readable lines. The omniscient log
+// interleaves a secret + public copy of each event after a |split| marker — we
+// drop the secret copy so events aren't printed twice.
 function readableLog(log: readonly string[]): string[] {
   const names: Record<string, string> = {};
   const out: string[] = [];
+  let skip = false;
   for (const line of log) {
+    if (line.startsWith("|split|")) { skip = true; continue; }
+    if (skip) { skip = false; continue; }
     if (!line.startsWith("|")) continue;
     const p = line.split("|");
+    const o = (s: string) => out.push(s);
     switch (p[1]) {
       case "player": if (p[2] && p[3]) names[p[2]] = p[3]; break;
-      case "switch": case "drag": out.push(`${names[p[2].slice(0, 2)] ?? ""} sent out ${nick(p[2])}.`.trimStart()); break;
-      case "faint": out.push(`${nick(p[2])} fainted.`); break;
-      case "move": out.push(`${nick(p[2])} used ${p[3]}.`); break;
-      case "-status": out.push(`${nick(p[2])} was ${STATUS_TEXT[p[3]] ?? p[3]}.`); break;
-      case "-terastallize": out.push(`${nick(p[2])} Terastallized to ${p[3]}!`); break;
-      case "-mega": out.push(`${nick(p[2])} Mega Evolved!`); break;
-      case "turn": out.push(`— Turn ${p[2]} —`); break;
+      case "switch": case "drag": o(`${names[p[2].slice(0, 2)] ?? ""} sent out ${nick(p[2])}.`.trimStart()); break;
+      case "faint": o(`${nick(p[2])} fainted.`); break;
+      case "move": o(`${nick(p[2])} used ${p[3]}.`); break;
+      case "cant": o(`${nick(p[2])} couldn't move.`); break;
+      case "-crit": o("A critical hit!"); break;
+      case "-supereffective": o("It's super effective!"); break;
+      case "-resisted": o("It's not very effective…"); break;
+      case "-immune": o(`It doesn't affect ${nick(p[2])}…`); break;
+      case "-miss": o(`${nick(p[2])}'s attack missed!`); break;
+      case "-fail": o("But it failed!"); break;
+      case "-status": o(`${nick(p[2])} was ${STATUS_TEXT[p[3]] ?? p[3]}.`); break;
+      case "-curestatus": o(`${nick(p[2])} was cured.`); break;
+      case "-boost": o(`${nick(p[2])}'s ${STAT_NAME[p[3]] ?? p[3]} ${Number(p[4]) >= 2 ? "rose sharply" : "rose"}!`); break;
+      case "-unboost": o(`${nick(p[2])}'s ${STAT_NAME[p[3]] ?? p[3]} ${Number(p[4]) >= 2 ? "harshly fell" : "fell"}!`); break;
+      case "-weather": if (p[3] !== "[upkeep]") o(p[2] === "none" ? "The weather cleared." : `${WEATHER[toID(p[2])] ?? p[2]} set in!`); break;
+      case "-fieldstart": o(`${fieldName(p[2])}${/trick ?room/i.test(p[2]) ? " twisted the dimensions" : ""}!`); break;
+      case "-fieldend": o(`${fieldName(p[2])} ended.`); break;
+      case "-sidestart": o(`${names[p[2].slice(0, 2)] ?? ""}: ${fieldName(p[3])} set up.`.trimStart()); break;
+      case "-ability": o(`${nick(p[2])}'s ${p[3]}!`); break;
+      case "-terastallize": o(`${nick(p[2])} Terastallized to ${p[3]}!`); break;
+      case "-mega": o(`${nick(p[2])} Mega Evolved!`); break;
+      case "turn": o(`— Turn ${p[2]} —`); break;
     }
   }
   return out;
@@ -91,6 +128,7 @@ export function replay(
       hpPct: mon.maxhp ? Math.max(0, Math.round((mon.hp / mon.maxhp) * 100)) : (mon.fainted ? 0 : 100),
       fainted: mon.fainted,
       status: mon.status || "",
+      tera: (mon as unknown as { terastallized?: string }).terastallized || "",
     } : null),
   });
 
@@ -98,6 +136,7 @@ export function replay(
   const vSide = viewer === "spectator" ? null : battle.sides[nearIdx];
   const owes = !!vSide && !vSide.isChoiceDone() && vSide.requestState !== "";
   const ended = !!battle.ended;
+  const f = battle.field as unknown as { weather?: string; terrain?: string; pseudoWeather?: Record<string, unknown> };
 
   return {
     turn: battle.turn,
@@ -108,6 +147,11 @@ export function replay(
     owes,
     near: sideView(nearIdx),
     far: sideView(nearIdx === 0 ? 1 : 0),
+    field: {
+      weather: f.weather ? (WEATHER[f.weather] ?? f.weather) : "",
+      terrain: f.terrain ? (TERRAIN[f.terrain] ?? f.terrain) : "",
+      trickRoom: Boolean(f.pseudoWeather?.trickroom),
+    },
     log: readableLog(battle.log),
   };
 }
