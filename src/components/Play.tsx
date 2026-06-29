@@ -37,6 +37,8 @@ export default function Play({ code }: { code: string }) {
     setBattles(bs);
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [code]);
+  // Warm the heavy battle engine bundle in the background so "Start" is instant.
+  useEffect(() => { import("@/lib/battle").catch(() => {}); }, []);
   // Default the AI opponent to your own team (a mirror match) so practice is one click.
   useEffect(() => { if (!oppTeam && myCoach && teamReady(myCoach)) setOppTeam(myCoach.id); }, [coaches]); // eslint-disable-line
 
