@@ -96,7 +96,9 @@ function synthSets(mon, moveNames) {
   const defStat = (s.def ?? 0) >= (s.spd ?? 0) ? "def" : "spd";
   const wallSpread = { evs: { hp: 252, [defStat]: 252, atk: 4 }, nature: defStat === "def" ? "Bold" : "Calm" };
   const tera = cap(mon.types[0] || "normal");
-  const ability = (mon.abilities && mon.abilities[0]) || "";
+  // Use the actual forme's ability (Mega/Primal/Totem formes differ from the base).
+  const formeSp = Dex.species.get(mon.name);
+  const ability = (formeSp.exists ? Object.values(formeSp.abilities)[0] : null) || (mon.abilities && mon.abilities[0]) || "";
 
   const sets = [];
   const seen = new Set();
@@ -234,8 +236,17 @@ for (const m of dex) {
   const list = synthSets(m, mp);
   if (list.length) { rolesOut[m.id] = list; synth++; }
 }
+// Mega/Primal formes have a forced forme ability — override the listed ability
+// to match (base species' randbats role would otherwise leave the base ability).
+let megaFix = 0;
+for (const m of dex) {
+  if (!m.isMega || !rolesOut[m.id]) continue;
+  const sp = Dex.species.get(m.name);
+  const ab = sp.exists ? Object.values(sp.abilities)[0] : null;
+  if (ab) { for (const r of rolesOut[m.id]) r.ability = ab; megaFix++; }
+}
 await writeFile(new URL("../public/roles.json", import.meta.url), JSON.stringify(rolesOut));
-console.log(`Wrote roles.json (${Object.keys(rolesOut).length} mons; ${synth} synthesized + randbats)`);
+console.log(`Wrote roles.json (${Object.keys(rolesOut).length} mons; ${synth} synthesized; ${megaFix} mega abilities fixed)`);
 
 // ── species.json (monId → canonical Showdown species name, so teams import cleanly) ──
 function showdownSpecies(m) {
