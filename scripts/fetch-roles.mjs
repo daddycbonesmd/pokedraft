@@ -50,52 +50,88 @@ function spreadFor(roleName, moves) {
 }
 
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
-const UTILITY = [
-  "Protect", "Detect", "Fake Out", "Follow Me", "Rage Powder", "Spore", "Sleep Powder", "Will-O-Wisp", "Thunder Wave",
-  "Swords Dance", "Nasty Plot", "Calm Mind", "Dragon Dance", "Quiver Dance", "Bulk Up", "Shell Smash",
-  "Recover", "Roost", "Synthesis", "Moonlight", "Slack Off", "Soft-Boiled", "Substitute", "Taunt",
-];
+const SETUP = ["Swords Dance", "Nasty Plot", "Calm Mind", "Dragon Dance", "Quiver Dance", "Bulk Up", "Shell Smash", "Agility", "Coil", "Tail Glow", "Work Up", "Victory Dance", "Take Heart"];
+const RECOVERY = ["Recover", "Roost", "Synthesis", "Moonlight", "Morning Sun", "Soft-Boiled", "Slack Off", "Strength Sap", "Milk Drink", "Shore Up", "Matcha Gotcha", "Jungle Healing", "Life Dew", "Wish", "Rest"];
+const STATUS = ["Will-O-Wisp", "Thunder Wave", "Toxic", "Spore", "Sleep Powder", "Nuzzle", "Glare", "Yawn", "Stun Spore", "Lovely Kiss", "Hypnosis", "Leech Seed"];
+const SUPPORT = ["Fake Out", "Follow Me", "Rage Powder", "Helping Hand", "Reflect", "Light Screen", "Aurora Veil", "Tailwind", "Trick Room", "Icy Wind", "Electroweb", "Pollen Puff", "Heal Pulse", "Decorate", "Coaching", "Ally Switch", "Taunt"];
+const FIXED = ["Seismic Toss", "Night Shade", "Body Press"]; // damage without offense stats — good on walls
+// Moves to avoid auto-picking (recharge / two-turn / gimmick) unless nothing better.
+const BAD = new Set(["Hyper Beam", "Giga Impact", "Blast Burn", "Hydro Cannon", "Frenzy Plant", "Roar of Time", "Rock Wrecker", "Prismatic Laser", "Eternabeam", "Sky Attack", "Razor Wind", "Skull Bash", "Solar Beam", "Solar Blade", "Meteor Beam", "Bounce", "Sky Drop", "Last Resort", "Focus Punch", "Bide", "Spit Up", "Natural Gift", "Snore", "Sleep Talk", "Mirror Move", "Self-Destruct", "Explosion", "Final Gambit", "Memento", "Synchronoise", "Dream Eater", "Hyper Voice"]);
 
-// Build one sensible "Balanced" set for Pokémon that have no randbats roles, so
-// every Pokémon gets an auto-build option. Picks STAB + coverage from the legal
-// movepool by base power, a utility move, and an offensive/bulky spread by stats.
-function synthSet(mon, moveNames) {
+// Build 1–3 role-appropriate auto-build sets for a Pokémon, best fit first.
+function synthSets(mon, moveNames) {
   const s = mon.stats || {};
-  const physical = (s.atk ?? 0) >= (s.spa ?? 0);
-  const wantCat = physical ? "Physical" : "Special";
+  const inPool = (list) => list.filter((n) => moveNames.includes(n));
   const md = moveNames.map((n) => Dex.moves.get(n)).filter((m) => m && m.exists);
   const isStab = (m) => mon.types.includes(m.type.toLowerCase());
-  const byBp = (a, b) => b.basePower - a.basePower;
-  const attacking = md.filter((m) => m.category === wantCat && m.basePower > 0);
-  const stab = attacking.filter(isStab).sort(byBp);
-  const coverage = attacking.filter((m) => !isStab(m)).sort(byBp);
-
-  const chosen = [];
-  const seenTypes = new Set();
-  const add = (name, type) => {
-    if (name && !chosen.includes(name) && chosen.length < 4) { chosen.push(name); if (type) seenTypes.add(type); }
-  };
-  if (stab[0]) add(stab[0].name, stab[0].type);
-  for (const m of coverage) { if (chosen.length >= 3) break; if (!seenTypes.has(m.type)) add(m.name, m.type); }
-  for (const m of [...stab.slice(1), ...attacking]) { if (chosen.length >= 3) break; add(m.name, m.type); }
-  const util = UTILITY.find((u) => moveNames.includes(u));
-  if (util) add(util);
-  for (const n of moveNames) { if (chosen.length >= 4) break; add(n); }
-  const moves = chosen.slice(0, 4);
-  if (!moves.length) return null;
-
-  const atk = physical ? "atk" : "spa";
+  const score = (m) => (m.basePower || 0) + (isStab(m) ? 25 : 0) - (BAD.has(m.name) ? 1000 : 0);
+  const phys = md.filter((m) => m.category === "Physical" && m.basePower > 0).sort((a, b) => score(b) - score(a));
+  const spec = md.filter((m) => m.category === "Special" && m.basePower > 0).sort((a, b) => score(b) - score(a));
+  const physical = (s.atk ?? 0) >= (s.spa ?? 0);
+  const offense = Math.max(s.atk ?? 0, s.spa ?? 0);
+  const bulk = (s.hp ?? 0) + (s.def ?? 0) + (s.spd ?? 0);
   const fast = (s.spe ?? 0) >= 80;
-  const evs = fast ? { hp: 4, [atk]: 252, spe: 252 } : { hp: 252, [atk]: 252, def: 4 };
-  const nature = fast ? (physical ? "Jolly" : "Timid") : (physical ? "Adamant" : "Modest");
-  return {
-    name: "Balanced",
-    moves,
-    ability: (mon.abilities && mon.abilities[0]) || "",
-    item: fast ? "Life Orb" : "Leftovers",
-    tera: cap(mon.types[0] || "normal"),
-    nature, evs, ivs: {}, level: LEVEL,
+  const setup = inPool(SETUP), recovery = inPool(RECOVERY), status = inPool(STATUS), support = inPool(SUPPORT), fixed = inPool(FIXED);
+  const hasProtect = moveNames.includes("Protect");
+
+  // Pick up to N attacking moves of a category: best STAB, then distinct-type coverage.
+  const attackMoves = (cat, n) => {
+    const pool = cat === "Physical" ? phys : spec;
+    const out = [], types = new Set();
+    for (const m of pool) { if (out.length >= n) break; if (isStab(m) && !types.has(m.type)) { out.push(m.name); types.add(m.type); } }
+    for (const m of pool) { if (out.length >= n) break; if (!types.has(m.type)) { out.push(m.name); types.add(m.type); } }
+    for (const m of pool) { if (out.length >= n) break; if (!out.includes(m.name)) out.push(m.name); }
+    return out;
   };
+  const fill = (moves) => {
+    const u = [...moves];
+    if (hasProtect && !u.includes("Protect") && u.length < 4) u.push("Protect");
+    for (const n of moveNames) { if (u.length >= 4) break; if (!u.includes(n)) u.push(n); }
+    return u.slice(0, 4);
+  };
+
+  const offSpread = (atk) => fast
+    ? { evs: { hp: 4, [atk]: 252, spe: 252 }, nature: atk === "atk" ? "Jolly" : "Timid" }
+    : { evs: { hp: 252, [atk]: 252, def: 4 }, nature: atk === "atk" ? "Adamant" : "Modest" };
+  const defStat = (s.def ?? 0) >= (s.spd ?? 0) ? "def" : "spd";
+  const wallSpread = { evs: { hp: 252, [defStat]: 252, atk: 4 }, nature: defStat === "def" ? "Bold" : "Calm" };
+  const tera = cap(mon.types[0] || "normal");
+  const ability = (mon.abilities && mon.abilities[0]) || "";
+
+  const sets = [];
+  const seen = new Set();
+  const push = (set) => { const k = set.moves.join(","); if (set.moves.length && !seen.has(k)) { seen.add(k); sets.push(set); } };
+
+  const offMoves = (cat) => fill([...attackMoves(cat, 3)]);
+  const physSet = () => ({ name: "Physical Attacker", moves: offMoves("Physical"), ability, item: fast ? "Life Orb" : "Assault Vest", tera, ...offSpread("atk"), ivs: {}, level: LEVEL });
+  const specSet = () => ({ name: "Special Attacker", moves: offMoves("Special"), ability, item: fast ? "Life Orb" : "Assault Vest", tera, ...offSpread("spa"), ivs: {}, level: LEVEL });
+  const setupSet = () => {
+    const cat = physical ? "Physical" : "Special";
+    const moves = fill([setup[0], ...attackMoves(cat, 2)]);
+    return { name: "Setup Sweeper", moves, ability, item: "Life Orb", tera, ...offSpread(physical ? "atk" : "spa"), ivs: {}, level: LEVEL };
+  };
+  const supportSet = () => {
+    const dmg = fixed[0] || attackMoves(physical ? "Physical" : "Special", 1)[0];
+    const picks = [recovery[0], status[0] || support[0], support[0] && support[0] !== (status[0] || support[0]) ? support[0] : support[1], dmg].filter(Boolean);
+    const moves = fill([...new Set(picks)]);
+    return { name: "Support", moves, ability, item: "Leftovers", tera, ...wallSpread, ivs: {}, level: LEVEL };
+  };
+
+  const isWall = offense <= 85 && bulk >= 300 && recovery.length > 0;
+  const wantSupport = recovery.length > 0 && (status.length + support.length) > 0;
+
+  // Order: best fit first.
+  if (isWall) { push(supportSet()); if (physical && phys.length) push(physSet()); else if (spec.length) push(specSet()); }
+  else {
+    if (physical && phys.length) push(physSet()); else if (spec.length) push(specSet());
+    if (setup.length && (phys.length || spec.length)) push(setupSet());
+    if (wantSupport) push(supportSet());
+    // a coverage-flipped attacker as a third option
+    if (sets.length < 2) { if (physical && spec.length) push(specSet()); else if (!physical && phys.length) push(physSet()); }
+  }
+  // Guarantee at least one set even for move-poor mons.
+  if (!sets.length) { const moves = fill([]); if (moves.length) push({ name: "Balanced", moves, ability, item: "Leftovers", tera, ...offSpread(physical ? "atk" : "spa"), ivs: {}, level: LEVEL }); }
+  return sets.slice(0, 3);
 }
 
 function collectRoles(rb, byKey) {
@@ -195,8 +231,8 @@ for (const m of dex) {
   // cosmetic/totem/cap/gender forms have no learnset of their own — borrow the base species'
   const mp = movepoolsOut[m.id] || movepoolsOut[m.baseId] || mpByBase[m.baseId] || mpByBase[m.id];
   if (!mp || !mp.length) continue;
-  const set = synthSet(m, mp);
-  if (set) { rolesOut[m.id] = [set]; synth++; }
+  const list = synthSets(m, mp);
+  if (list.length) { rolesOut[m.id] = list; synth++; }
 }
 await writeFile(new URL("../public/roles.json", import.meta.url), JSON.stringify(rolesOut));
 console.log(`Wrote roles.json (${Object.keys(rolesOut).length} mons; ${synth} synthesized + randbats)`);
@@ -206,6 +242,13 @@ function showdownSpecies(m) {
   let sp = Dex.species.get(m.name);
   if (!sp.exists) sp = Dex.species.get(FORM_KEY[norm(m.name)] || "");
   if (!sp.exists && m.isMega) sp = Dex.species.get(baseName.get(m.baseId) || "");
+  // Cosmetic/event forms (cap Pikachus, Totems, Minior meteors, plumages) aren't
+  // valid battle species — fall back to a species the engine knows so teams load.
+  if (!sp.exists) sp = Dex.species.get(baseName.get(m.baseId) || "");
+  if (!sp.exists) {
+    const parts = m.name.split("-");
+    while (parts.length > 1 && !sp.exists) { parts.pop(); sp = Dex.species.get(parts.join("-")); }
+  }
   return sp.exists ? sp.name : m.display;
 }
 const speciesOut = {};
