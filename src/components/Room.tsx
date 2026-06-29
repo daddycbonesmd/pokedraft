@@ -203,6 +203,30 @@ export default function Room({ code }: { code: string }) {
     return () => cleanup();
   }, [code, identity, router, refresh]);
 
+  // ── Auto-sell countdown ──────────────────────────────────────────
+  // No new bid for 5s → 3·2·1·0 → after 2s on 0 the admin client auto-sells.
+  // Timing is tracked locally (Date.now) so it's immune to client/server skew.
+  const [now, setNow] = useState(() => Date.now());
+  const lastBidRef = useRef(Date.now());
+  const soldRef = useRef(false);
+  const activeLotId = state?.activeLot?.id ?? null;
+  const topBidId = state?.bids?.[0]?.id ?? null;
+  useEffect(() => { lastBidRef.current = Date.now(); soldRef.current = false; setNow(Date.now()); }, [activeLotId, topBidId]);
+  useEffect(() => {
+    if (!activeLotId) return;
+    const iv = setInterval(() => setNow(Date.now()), 200);
+    return () => clearInterval(iv);
+  }, [activeLotId]);
+  useEffect(() => {
+    if (!state || soldRef.current) return;
+    const admin = Boolean(identity?.adminToken && identity.adminToken === state.league.admin_token);
+    const lot = state.activeLot, top = state.bids?.[0];
+    if (admin && lot && top && Date.now() - lastBidRef.current >= 10000) {
+      soldRef.current = true;
+      sellLot(lot).then(refresh).catch(() => { soldRef.current = false; refresh(); });
+    }
+  }, [now, state, identity, refresh]);
+
   if (!supabaseReady) return <EnvNotice />;
   if (fatal) return <Centered>{fatal} <Link href="/" className="text-coral underline">Home</Link></Centered>;
   if (!state || !monMap) return <Centered><span className="hand text-3xl text-coral">opening the room…</span></Centered>;
@@ -215,6 +239,9 @@ export default function Room({ code }: { code: string }) {
   const highBid = bids[0] ?? null;
   const highCoach = highBid ? coaches.find((c) => c.id === highBid.coach_id) ?? null : null;
   const nextBid = highBid ? highBid.amount + increment : OPENING;
+  // Countdown: 3 (5s) → 2 → 1 → 0 (8s, held 2s) → sold (10s). Only with a standing bid.
+  const idleMs = activeLot ? now - lastBidRef.current : 0;
+  const countdownNum = highCoach && idleMs >= 5000 ? Math.max(0, 3 - Math.floor((idleMs - 5000) / 1000)) : null;
 
   const spent = (c: Coach) => wonLots.filter((l) => l.winner_coach_id === c.id).reduce((s, l) => s + (l.final_price ?? 0), 0);
   const remaining = (c: Coach) => league.budget - spent(c);
@@ -808,12 +835,26 @@ export default function Room({ code }: { code: string }) {
                   <>Opening at <span className="font-display text-2xl font-black">{OPENING}</span></>
                 )}
               </p>
-              {isAdmin && (
-                <div className="flex gap-3">
-                  <button className="btn btn-coral" onClick={() => act(() => sellLot(activeLot!))} disabled={!highCoach}>Sold!</button>
-                  <button className="btn btn-ghost" onClick={() => act(() => passLot(activeLot!.id))}>Pass</button>
-                </div>
-              )}
+              <div className="flex items-center gap-3">
+                {countdownNum !== null && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-ink-soft">{countdownNum > 0 ? "Going once…" : "Sold!"}</span>
+                    <span key={countdownNum} className="cd-pop font-display text-3xl font-black grid place-items-center rounded-full w-12 h-12 text-white"
+                      style={{ background: countdownNum > 0 ? "var(--coral)" : "var(--teal, #2f8f83)" }}>
+                      {countdownNum > 0 ? countdownNum : "✓"}
+                    </span>
+                  </div>
+                )}
+                {isAdmin && (
+                  <div className="flex gap-2">
+                    {countdownNum === null && highCoach && (
+                      <button className="btn btn-coral" onClick={() => act(() => sellLot(activeLot!))}>Sell now</button>
+                    )}
+                    <button className="btn btn-ghost" onClick={() => act(() => passLot(activeLot!.id))}>Pass</button>
+                  </div>
+                )}
+              </div>
+              <style jsx>{`.cd-pop { animation: cdpop 0.25s ease-out; } @keyframes cdpop { from { transform: scale(1.6); opacity: 0.4; } to { transform: scale(1); opacity: 1; } }`}</style>
             </div>
           </>
         ) : (
