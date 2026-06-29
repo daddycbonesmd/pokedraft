@@ -17,16 +17,31 @@ export type League = {
   ruleset: string; // e.g. "VGC 2025 Reg I · Tera" — shown in the room
   battle_format: BattleFormat; // singles or doubles — drives the battle engine
   legal_items: string[] | null; // allowed held items (names); null = all legal
+  generation?: number; // 9 = Tera+Mega, 8 = Dynamax+Mega, 7 = Z-moves+Mega (default 9)
   created_at: string;
 };
 
 export type BattleFormat = "singles" | "doubles";
-// The Showdown engine format id used for battles in this league.
-// Doubles is "bring 4 of your team, send 2 out" (VGC-style): Picked Team Size = 4
-// restricts the active field to the 4 chosen mons, so faint/switch prompts only
-// ever offer those 4 — never the full roster of 6.
-export const engineFormat = (f: BattleFormat) =>
-  f === "singles" ? "gen9customgame" : "gen9doublescustomgame@@@Picked Team Size = 4";
+
+// Which signature gimmick each supported generation brings to a battle. Mega
+// Evolution works in every generation (it's gated by holding a Mega Stone), so
+// it isn't listed here — this is just the headline mechanic per gen.
+export const GENERATIONS = [
+  { gen: 9, label: "Gen 9", gimmick: "Terastallization", blurb: "Tera + Mega" },
+  { gen: 8, label: "Gen 8", gimmick: "Dynamax / Gigantamax", blurb: "Dynamax + Mega" },
+  { gen: 7, label: "Gen 7", gimmick: "Z-Moves", blurb: "Z-Moves + Mega" },
+] as const;
+export const normalizeGen = (g?: number) => (g === 7 || g === 8 ? g : 9);
+
+// The Showdown engine format id used for battles in this league. The generation
+// picks which gimmick is available (Tera/Dynamax/Z); doubles is "bring 4, send 2"
+// (VGC-style): Picked Team Size = 4 restricts the active field to the 4 chosen mons
+// so faint/switch prompts only ever offer those 4 — never the full roster of 6.
+export const engineFormat = (f: BattleFormat, generation?: number) => {
+  const gen = normalizeGen(generation);
+  const base = `gen${gen}${f === "doubles" ? "doubles" : ""}customgame`;
+  return f === "doubles" ? `${base}@@@Picked Team Size = 4` : base;
+};
 
 export type Coach = {
   id: string;
@@ -121,6 +136,7 @@ export async function createLeague(opts: {
   teamSize?: number;
   battleFormat?: BattleFormat;
   legalItems?: string[] | null;
+  generation?: number;
 }): Promise<{ league: League; coach: Coach }> {
   const code = makeCode();
   const admin_token = crypto.randomUUID();
@@ -136,12 +152,17 @@ export async function createLeague(opts: {
     status: "drafting",
     ruleset: opts.ruleset ?? "",
   };
+  const withFormat = { ...base, battle_format: opts.battleFormat ?? "doubles", legal_items: opts.legalItems ?? null };
   let { data: league, error } = await supabase
     .from("leagues")
-    .insert({ ...base, battle_format: opts.battleFormat ?? "doubles", legal_items: opts.legalItems ?? null })
+    .insert({ ...withFormat, generation: normalizeGen(opts.generation) })
     .select()
     .single();
-  // Tolerate the newer columns not being migrated yet.
+  // Tolerate newer columns not being migrated yet — drop generation first (so a DB
+  // that has battle_format but not generation keeps its format), then everything.
+  if (error && /generation|column/i.test(error.message ?? "")) {
+    ({ data: league, error } = await supabase.from("leagues").insert(withFormat).select().single());
+  }
   if (error && /battle_format|legal_items|column/i.test(error.message ?? "")) {
     ({ data: league, error } = await supabase.from("leagues").insert(base).select().single());
   }
@@ -314,6 +335,7 @@ export type Battle = {
   id: string;
   league_id: string;
   format: string;
+  generation?: number; // engine generation (9/8/7); absent = 9
   p1_coach_id: string | null;
   p2_coach_id: string | null;
   p1_name: string;
@@ -329,7 +351,7 @@ export type Battle = {
 export type BattleChoice = { id: string; battle_id: string; side: string; seq: number; choice: string; created_at: string };
 
 export async function createBattle(b: {
-  leagueId: string; format: string;
+  leagueId: string; format: string; generation?: number;
   p1: { coachId: string | null; name: string; team: string };
   p2: { coachId: string | null; name: string; team: string }; // coachId null = AI (practice)
   seed: number[]; matchId?: string | null;
@@ -340,7 +362,12 @@ export async function createBattle(b: {
     p1_name: b.p1.name, p2_name: b.p2.name,
     p1_team: b.p1.team, p2_team: b.p2.team, seed: b.seed,
   };
-  let { data, error } = await supabase.from("battles").insert({ ...row, match_id: b.matchId ?? null }).select().single();
+  const withExtras = { ...row, match_id: b.matchId ?? null, generation: normalizeGen(b.generation) };
+  let { data, error } = await supabase.from("battles").insert(withExtras).select().single();
+  // Peel off newer columns one tier at a time if they aren't migrated yet.
+  if (error && /generation|column/i.test(error.message ?? "")) {
+    ({ data, error } = await supabase.from("battles").insert({ ...row, match_id: b.matchId ?? null }).select().single());
+  }
   if (error && /match_id|column/i.test(error.message ?? "")) {
     ({ data, error } = await supabase.from("battles").insert(row).select().single());
   }

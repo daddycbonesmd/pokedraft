@@ -77,6 +77,15 @@ export const ITEM_FALLBACKS = [
   "Wide Lens", "Mental Herb", "Clear Amulet", "Eviolite", "Weakness Policy", "Throat Spray",
   "Mystic Water", "Charcoal", "Magnet", "Miracle Seed", "Light Clay", "Mirror Herb",
 ];
+// Gen-7 Z-Crystals (the 18 type crystals — each upgrades a matching-type move into
+// a Z-Move). Offered as item suggestions only in Gen-7 leagues. Signature crystals
+// (Pikanium Z, etc.) can still be typed in by hand since the item field is freeform.
+export const Z_CRYSTALS: ItemInfo[] = [
+  "Buginium Z", "Darkinium Z", "Dragonium Z", "Electrium Z", "Fairium Z", "Fightinium Z",
+  "Firium Z", "Flyinium Z", "Ghostium Z", "Grassium Z", "Groundium Z", "Icium Z",
+  "Normalium Z", "Poisonium Z", "Psychium Z", "Rockium Z", "Steelium Z", "Waterium Z",
+].map((name) => ({ name, desc: "Upgrades a matching-type move into a Z-Move once per battle (Gen 7).", cat: "Z-Crystal" }));
+
 export function uniqueItem(preferred: string, taken: Set<string>): string {
   if (!preferred || !taken.has(preferred)) return preferred;
   for (const it of ITEM_FALLBACKS) if (!taken.has(it)) return it;

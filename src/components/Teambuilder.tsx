@@ -8,7 +8,7 @@ import { getIdentity, getLeagueByCode, getRoomState, saveTeam } from "@/lib/db";
 import { supabaseReady } from "@/lib/supabase";
 import {
   STATS, STAT_LABEL, EV_TOTAL_MAX, EV_STAT_MAX, NATURES, natureLabel, TERA_TYPES,
-  loadRoles, loadMovepools, loadSpecies, loadItems,
+  loadRoles, loadMovepools, loadSpecies, loadItems, Z_CRYSTALS,
   emptySet, setFromRole, setReady, evTotal, teamToShowdown, uniqueItem,
   type BattleSet, type RoleSet, type Stat, type ItemInfo,
 } from "@/lib/teambuilder";
@@ -23,6 +23,7 @@ export default function Teambuilder({ code }: { code: string }) {
   const [items, setItems] = useState<ItemInfo[]>([]);
   const [legalItems, setLegalItems] = useState<Set<string> | null>(null);
   const [battleFormat, setBattleFormat] = useState<string>("doubles");
+  const [generation, setGeneration] = useState<number>(9);
   const [fatal, setFatal] = useState("");
   const [saved, setSaved] = useState<"idle" | "saving" | "ok">("idle");
   const [copied, setCopied] = useState(false);
@@ -41,6 +42,7 @@ export default function Teambuilder({ code }: { code: string }) {
       if (!me) { setFatal("You're not a coach in this league."); return; }
       setCoachId(me.id);
       setBattleFormat(league.battle_format ?? "doubles");
+      setGeneration(league.generation ?? 9);
       setLegalItems(league.legal_items ? new Set(league.legal_items) : null);
       setRoles(r); setMovepools(mp); setItems(it);
 
@@ -136,7 +138,9 @@ export default function Teambuilder({ code }: { code: string }) {
 
   const readyCount = setsList.filter(setReady).length;
   // No explicit list = all standard items (Mega Stones are opt-in via the format).
-  const itemOptions = legalItems ? items.filter((i) => legalItems.has(i.name)) : items.filter((i) => i.cat !== "Mega Stone");
+  // Gen-7 leagues also surface Z-Crystals so players can equip a Z-Move.
+  const baseItems = legalItems ? items.filter((i) => legalItems.has(i.name)) : items.filter((i) => i.cat !== "Mega Stone");
+  const itemOptions = generation === 7 ? [...baseItems, ...Z_CRYSTALS] : baseItems;
   const itemCounts: Record<string, number> = {};
   for (const set of setsList) if (set.item) itemCounts[set.item] = (itemCounts[set.item] ?? 0) + 1;
   const dupItems = Object.keys(itemCounts).filter((it) => itemCounts[it] > 1);
@@ -148,7 +152,8 @@ export default function Teambuilder({ code }: { code: string }) {
           <h1 className="font-display text-3xl font-black">Build your <span className="text-coral">battle team</span></h1>
           <p className="text-sm text-ink-soft">
             League <span className="font-mono font-bold">{code}</span> ·{" "}
-            <span className="capitalize font-semibold text-ink">{battleFormat}</span> · {readyCount}/{mons.length} ready ·{" "}
+            <span className="capitalize font-semibold text-ink">{battleFormat}</span> ·{" "}
+            <span className="font-semibold text-ink">Gen {generation} {generation === 7 ? "(Z-Moves)" : generation === 8 ? "(Dynamax)" : "(Tera)"}</span> · {readyCount}/{mons.length} ready ·{" "}
             {saved === "saving" ? "saving…" : saved === "ok" ? "saved" : ""}
             {dupItems.length > 0 && <span className="text-coral font-semibold"> · ⚠ duplicate item: {dupItems.join(", ")}</span>}
           </p>

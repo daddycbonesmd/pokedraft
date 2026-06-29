@@ -25,7 +25,14 @@ export type Request = {
   teamPreview?: boolean;
   wait?: boolean;
   forceSwitch?: boolean[];
-  active?: ({ moves: { move: string; id: string; pp: number; maxpp: number; target: string; disabled?: boolean }[]; canTerastallize?: string; canMegaEvo?: boolean; canMegaEvoX?: boolean; canMegaEvoY?: boolean } | null)[] | null;
+  active?: ({
+    moves: { move: string; id: string; pp: number; maxpp: number; target: string; disabled?: boolean }[];
+    canTerastallize?: string;
+    canMegaEvo?: boolean; canMegaEvoX?: boolean; canMegaEvoY?: boolean;
+    canDynamax?: boolean;
+    maxMoves?: { maxMoves: { move: string; target: string }[]; gigantamax?: string };
+    canZMove?: ({ move: string; target: string } | null)[];
+  } | null)[] | null;
   side?: { name: string; pokemon: { ident: string; details: string; condition: string; active: boolean }[] };
 };
 

@@ -116,6 +116,7 @@ export function buildTimeline(raw: string[], viewer: Viewer): Step[] {
         const m = model[pos(p[2])]; if (!m) break;
         const cond = parseCond(p[3] ?? "");
         m.hpPct = cond.hpPct; m.fainted = cond.fainted;
+        if (line.includes("[silent]")) { emit(null, "info", 200); break; }
         const from = p[4]?.startsWith("[from]") ? p[4].replace("[from] ", "") : "";
         if (from) {
           const src = STATUS_DMG[from] ?? clean(from);
@@ -128,6 +129,7 @@ export function buildTimeline(raw: string[], viewer: Viewer): Step[] {
       case "-heal": {
         const m = model[pos(p[2])]; if (!m) break;
         const cond = parseCond(p[3] ?? ""); m.hpPct = cond.hpPct; m.fainted = cond.fainted;
+        if (line.includes("[silent]")) { emit(null, "info", 200); break; } // e.g. the Dynamax HP boost
         const from = p[4]?.startsWith("[from]") ? clean(p[4].replace("[from] ", "")) : "";
         emit(from ? `${nick(p[2])} was healed by ${from}!` : `${nick(p[2])} restored its health!`, "heal", 800);
         break;
@@ -162,7 +164,13 @@ export function buildTimeline(raw: string[], viewer: Viewer): Step[] {
       case "-sidestart": emit(`${clean(p[3])} set up on ${names[p[2]?.slice(0, 2)] ?? "the"} side!`, "field", 700); break;
       case "-ability": emit(`${nick(p[2])}'s ${p[3]}!`, "ability", 850); break;
       case "-activate": { const eff = clean(p[3] ?? ""); if (eff) emit(/protect/i.test(eff) ? `${nick(p[2])} protected itself!` : `${nick(p[2])}: ${eff}!`, "info", 750); break; }
-      case "-start": { const eff = clean(p[3] ?? ""); if (eff) emit(`${nick(p[2])}: ${eff}!`, "status", 800); break; }
+      case "-start": {
+        const eff = clean(p[3] ?? "");
+        if (/^g?max$/i.test(eff) || /dynamax/i.test(eff)) emit(`${nick(p[2])} ${/gmax/i.test(eff) ? "Gigantamaxed" : "Dynamaxed"}!`, "field", 950);
+        else if (eff) emit(`${nick(p[2])}: ${eff}!`, "status", 800);
+        break;
+      }
+      case "-zpower": emit(`${nick(p[2])} surrounded itself with its Z-Power!`, "field", 900); break;
       case "-terastallize": { const m = model[pos(p[2])]; if (m) m.tera = p[3]; emit(`${nick(p[2])} Terastallized into ${p[3]}!`, "field", 950); break; }
       case "-mega": emit(`${nick(p[2])} Mega Evolved!`, "field", 950); break;
       case "-enditem": if (p[3]) emit(`${nick(p[2])} used its ${p[3]}!`, "info", 750); break;

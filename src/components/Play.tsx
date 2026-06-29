@@ -61,6 +61,7 @@ export default function Play({ code }: { code: string }) {
       const battle = await createBattle({
         leagueId: league.id,
         format: league.battle_format ?? "doubles",
+        generation: league.generation,
         p1: { coachId: c1.id, name: c1.name, team: t1 },
         p2: { coachId: c2.id, name: c2.name, team: t2 },
         seed: [rand(), rand(), rand(), rand()],
@@ -86,6 +87,7 @@ export default function Play({ code }: { code: string }) {
       const battle = await createBattle({
         leagueId: league.id,
         format: league.battle_format ?? "doubles",
+        generation: league.generation,
         p1: { coachId: myCoach.id, name: myCoach.name, team: packTeam(teamToShowdown(myCoach.team!)) },
         p2: { coachId: null, name: "Computer", team: packTeam(teamToShowdown(opp.team!)) },
         seed: [rand(), rand(), rand(), rand()],

@@ -17,6 +17,12 @@ import { buildTimeline, type Step, type BannerTone } from "@/lib/playback";
 const NEED_TARGET = new Set(["normal", "any", "adjacentFoe"]);
 type MoveInfo = { name: string; type: string; cat: "Physical" | "Special" | "Status"; bp: number; acc: number; pp: number; pr: number; target: string; desc: string };
 type FoeInfo = { species: string; types: string[]; fainted: boolean } | null;
+type Gimmick = "mega" | "terastallize" | "dynamax" | "zmove";
+// "maxflare" → "Max Flare", "gmaxwildfire" → "G-Max Wildfire"
+const prettyMax = (id: string) =>
+  id.startsWith("gmax") ? "G-Max " + id.slice(4).replace(/^./, (c) => c.toUpperCase())
+  : id.startsWith("max") ? "Max " + id.slice(3).replace(/^./, (c) => c.toUpperCase())
+  : id.replace(/^./, (c) => c.toUpperCase());
 const CAT_ICON: Record<string, string> = { Physical: "●", Special: "◆", Status: "○" };
 const STAT_ORDER = ["hp", "atk", "def", "spa", "spd", "spe"] as const;
 const STAT_SHORT: Record<string, string> = { hp: "HP", atk: "Atk", def: "Def", spa: "SpA", spd: "SpD", spe: "Spe", accuracy: "Acc", evasion: "Eva" };
@@ -48,7 +54,7 @@ export default function Battle({ id }: { id: string }) {
   const [snap, setSnap] = useState<BattleSnapshot | null>(null);
   const [choices, setChoices] = useState<BattleChoice[]>([]);
   const [pending, setPending] = useState<Record<number, SlotChoice>>({});
-  const [gimmick, setGimmick] = useState<Record<number, "mega" | "terastallize">>({});
+  const [gimmick, setGimmick] = useState<Record<number, Gimmick>>({});
   const [fatal, setFatal] = useState("");
   const [code, setCode] = useState("");
   const reported = useRef(false);
@@ -97,7 +103,7 @@ export default function Battle({ id }: { id: string }) {
       const [b, ch] = await Promise.all([getBattle(id), getBattleChoices(id)]);
       if (!b || cancelled) return;
       const s = replay({
-        formatid: engineFormat(b.format as BattleFormat),
+        formatid: engineFormat(b.format as BattleFormat, b.generation),
         p1: { name: b.p1_name, team: b.p1_team }, p2: { name: b.p2_name, team: b.p2_team },
         seed: b.seed, choices: ch.map((c) => ({ side: c.side, choice: c.choice })),
       }, viewer);
@@ -142,7 +148,7 @@ export default function Battle({ id }: { id: string }) {
         if (!b || b.status !== "active") return;
         const ch = await getBattleChoices(id);
         const p2 = replay({
-          formatid: engineFormat(b.format as BattleFormat),
+          formatid: engineFormat(b.format as BattleFormat, b.generation),
           p1: { name: b.p1_name, team: b.p1_team }, p2: { name: b.p2_name, team: b.p2_team },
           seed: b.seed, choices: ch.map((c) => ({ side: c.side, choice: c.choice })),
         }, "p2");
@@ -559,9 +565,9 @@ const hpFromCondition = (c: string) => {
 
 function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, movedex, onMove, onTarget, onSwitch, onGimmick }: {
   slot: number; req: Request; benched: { details: string; condition: string; party: number }[]; chosen?: SlotChoice;
-  gimmick?: "mega" | "terastallize"; foes: Slot[]; foeInfos: FoeInfo[]; movedex: Record<string, MoveInfo>;
+  gimmick?: Gimmick; foes: Slot[]; foeInfos: FoeInfo[]; movedex: Record<string, MoveInfo>;
   onMove: (moveIndex: number, target: string) => void; onTarget: (foeIndex: number) => void;
-  onSwitch: (partyIndex: number) => void; onGimmick: (g?: "mega" | "terastallize") => void;
+  onSwitch: (partyIndex: number) => void; onGimmick: (g?: Gimmick) => void;
 }) {
   const active = req.active?.[slot];
   const forceSwitch = req.forceSwitch?.[slot];
@@ -583,8 +589,8 @@ function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, move
           </div>
         </div>
       )}
-      {!forceSwitch && active && (active.canMegaEvo || active.canTerastallize) && (
-        <div className="flex gap-1.5 mb-2">
+      {!forceSwitch && active && (active.canMegaEvo || active.canTerastallize || active.canDynamax || active.canZMove?.some(Boolean)) && (
+        <div className="flex flex-wrap gap-1.5 mb-2">
           {active.canMegaEvo && (
             <button onClick={() => onGimmick(gimmick === "mega" ? undefined : "mega")}
               className="text-xs font-bold rounded px-2 py-1 transition"
@@ -599,26 +605,49 @@ function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, move
               ✦ Tera {active.canTerastallize}
             </button>
           )}
+          {active.canDynamax && (
+            <button onClick={() => onGimmick(gimmick === "dynamax" ? undefined : "dynamax")}
+              className="text-xs font-bold rounded px-2 py-1 transition"
+              style={{ background: gimmick === "dynamax" ? "#d6426b" : "rgba(214,66,107,0.15)", color: gimmick === "dynamax" ? "#fff" : "#b02a52" }}>
+              ◎ {active.maxMoves?.gigantamax ? "Gigantamax" : "Dynamax"}
+            </button>
+          )}
+          {active.canZMove?.some(Boolean) && (
+            <button onClick={() => onGimmick(gimmick === "zmove" ? undefined : "zmove")}
+              className="text-xs font-bold rounded px-2 py-1 transition"
+              style={{ background: gimmick === "zmove" ? "#e0a417" : "rgba(224,164,23,0.15)", color: gimmick === "zmove" ? "#fff" : "#9c7110" }}>
+              ✺ Z-Power
+            </button>
+          )}
         </div>
       )}
       {!forceSwitch && active && (
         <div className="grid grid-cols-2 gap-1.5 mb-2">
           {active.moves.map((mv, j) => {
             const info = movedex[mv.id];
-            const disabled = mv.disabled || mv.pp === 0;
+            // When a gimmick is armed the slot turns into its empowered move: Max/G-Max
+            // for Dynamax, the Z-move for Z-Power. Z-Power only lights up slots the held
+            // Z-Crystal actually empowers, so the rest are locked out while it's armed.
+            const dyna = gimmick === "dynamax" ? active.maxMoves?.maxMoves?.[j] : undefined;
+            const zed = gimmick === "zmove" ? active.canZMove?.[j] ?? undefined : undefined;
+            const label = dyna ? prettyMax(dyna.move) : zed ? zed.move : mv.move;
+            const effTarget = dyna ? dyna.target : zed ? zed.target : mv.target;
+            const zLocked = gimmick === "zmove" && !active.canZMove?.[j];
+            const disabled = mv.disabled || mv.pp === 0 || zLocked;
             const sel = chosen?.kind === "move" && chosen.index === j + 1;
             const color = info ? (TYPE_COLORS[info.type.toLowerCase()] ?? "#777") : "#777";
             // Effectiveness preview: only damaging moves have a type matchup worth
-            // showing (status moves like Protect/Tailwind don't "hit" a type).
+            // showing (status moves like Protect/Tailwind don't "hit" a type). Max/Z
+            // moves keep their base move's type, so the matchup still holds.
             const showEff = info && info.cat !== "Status" && liveFoes.length > 0;
             const effs = showEff ? liveFoes.map((f) => ({ f, x: typeEffectiveness(info!.type, f.types) })) : [];
             return (
-              <button key={j} disabled={disabled} onClick={() => onMove(j + 1, mv.target)}
-                title={info ? `${mv.move} — ${info.type} ${info.cat}\nPower ${info.bp || "—"} · Acc ${info.acc || "—"} · ${mv.pp}/${mv.maxpp} PP\n${info.desc}` : mv.move}
+              <button key={j} disabled={disabled} onClick={() => onMove(j + 1, effTarget)}
+                title={info ? `${label} — ${info.type} ${info.cat}\nPower ${info.bp || "—"} · Acc ${info.acc || "—"} · ${mv.pp}/${mv.maxpp} PP\n${info.desc}` : label}
                 className="group relative rounded px-2 py-1.5 text-left text-white disabled:opacity-40 transition"
                 style={{ background: color, boxShadow: sel ? "0 0 0 2.5px var(--ink)" : "inset 0 -2px 0 rgba(0,0,0,0.18)" }}>
                 <div className="flex items-center justify-between gap-1">
-                  <span className="text-xs font-bold leading-tight drop-shadow-sm">{mv.move}</span>
+                  <span className="text-xs font-bold leading-tight drop-shadow-sm">{label}</span>
                   <span className="text-[11px] opacity-90">{CAT_ICON[info?.cat ?? "Status"]}</span>
                 </div>
                 <div className="text-[9px] opacity-90">{info?.type ?? ""} · {mv.pp}/{mv.maxpp} PP</div>

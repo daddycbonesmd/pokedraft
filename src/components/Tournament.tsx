@@ -100,7 +100,7 @@ export default function TournamentView({ code }: { code: string }) {
       if (existing) { router.push(`/battle/${existing.id}`); return; }
       const { packTeam } = await import("@/lib/battle");
       const battle = await createBattle({
-        leagueId: league!.id, format: league!.battle_format ?? "doubles",
+        leagueId: league!.id, format: league!.battle_format ?? "doubles", generation: league!.generation,
         p1: { coachId: ca.id, name: ca.name, team: packTeam(teamToShowdown(ca.team!)) },
         p2: { coachId: cb.id, name: cb.name, team: packTeam(teamToShowdown(cb.team!)) },
         seed: [rand(), rand(), rand(), rand()], matchId: m.id,
