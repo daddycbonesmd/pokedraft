@@ -327,8 +327,8 @@ export type BattleChoice = { id: string; battle_id: string; side: string; seq: n
 
 export async function createBattle(b: {
   leagueId: string; format: string;
-  p1: { coachId: string; name: string; team: string };
-  p2: { coachId: string; name: string; team: string };
+  p1: { coachId: string | null; name: string; team: string };
+  p2: { coachId: string | null; name: string; team: string }; // coachId null = AI (practice)
   seed: number[]; matchId?: string | null;
 }): Promise<Battle> {
   const row = {

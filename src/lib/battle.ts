@@ -2,7 +2,7 @@
 // (@pkmn/sim). The host's browser runs the BattleStream; player/spectator views
 // are relayed over Supabase in the networked battle (Stage 3). For now this
 // exposes the primitives + a self-playing demo to prove the engine bundles.
-import { BattleStreams, Teams } from "@pkmn/sim";
+import { Battle, BattleStreams, Teams } from "@pkmn/sim";
 
 // Turn Showdown export text (what the teambuilder produces) into the packed
 // team string the sim expects. Throws if the text can't be parsed.
@@ -18,23 +18,10 @@ export function packTeam(exportText: string): string {
 
 export type PlayerSide = "p1" | "p2";
 export type Viewer = PlayerSide | "spectator";
-
-export function setupCommands(
-  engineFormatId: string,
-  p1: { name: string; team: string },
-  p2: { name: string; team: string },
-  seed: number[],
-): string[] {
-  return [
-    `>start ${JSON.stringify({ formatid: engineFormatId, seed })}`,
-    `>player p1 ${JSON.stringify({ name: p1.name, team: p1.team })}`,
-    `>player p2 ${JSON.stringify({ name: p2.name, team: p2.team })}`,
-  ];
-}
+export type ChoiceEntry = { side: string; choice: string };
 
 // Engine request object (only the bits the UI uses).
 export type Request = {
-  rqid?: number;
   teamPreview?: boolean;
   wait?: boolean;
   forceSwitch?: boolean[];
@@ -49,102 +36,81 @@ export type BattleSnapshot = {
   ended: boolean;
   winner: string | null;
   viewer: Viewer;
-  request: Request | null; // for the viewer side (null for spectators / waiting)
+  request: Request | null; // the viewer's current request (options to choose from)
+  owes: boolean;           // whether the viewer must make a choice right now (authoritative)
   near: SideView;          // viewer's side
   far: SideView;           // opponent
   log: string[];           // human-readable events
 };
-
-function parseCondition(c: string): { hpPct: number; fainted: boolean; status: string } {
-  const [hp, ...rest] = c.split(" ");
-  const [cur, max] = hp.split("/").map(Number);
-  const fainted = c.includes("fnt") || cur === 0;
-  return { hpPct: max ? Math.max(0, Math.round((cur / max) * 100)) : fainted ? 0 : 100, fainted, status: rest.join(" ") };
-}
 
 const STATUS_TEXT: Record<string, string> = {
   brn: "burned", par: "paralyzed", psn: "poisoned", tox: "badly poisoned", slp: "put to sleep", frz: "frozen",
 };
 const nick = (idAndName: string) => idAndName.split(": ")[1] ?? idAndName;
 
-// Replay the command list and return the given viewer's point of view.
-export async function replay(commands: string[], viewer: Viewer): Promise<BattleSnapshot> {
-  const streams = BattleStreams.getPlayerStreams(new BattleStreams.BattleStream());
-  const stream = viewer === "spectator" ? streams.spectator : streams[viewer];
-
-  const names: Record<string, string> = { p1: "P1", p2: "P2" };
-  const sides: Record<string, Slot[]> = { p1: [null, null], p2: [null, null] };
-  let turn = 0, winner: string | null = null, ended = false;
-  let request: Request | null = null;
-  const log: string[] = [];
-
-  const slotOf = (id: string) => ({ side: id.slice(0, 2), pos: id.charCodeAt(2) - 97 });
-  const setSlot = (ref: string, details: string, cond: string) => {
-    const { side, pos } = slotOf(ref);
-    sides[side][pos] = { species: details.split(",")[0], ...parseCondition(cond) };
-  };
-  const updateCond = (ref: string, cond: string) => {
-    const { side, pos } = slotOf(ref);
-    const s = sides[side][pos];
-    if (s) Object.assign(s, parseCondition(cond));
-  };
-
-  const consume = (async () => {
-   try {
-    for await (const chunk of stream)
-      for (const line of chunk.split("\n")) {
-        if (!line.startsWith("|")) continue;
-        const p = line.split("|"); // ["", tag, ...args]
-        const tag = p[1];
-        if (tag === "request") { request = line.length > 9 ? JSON.parse(line.slice(9)) : null; }
-        else if (tag === "player") { if (p[2] && p[3]) names[p[2]] = p[3]; }
-        else if (tag === "switch" || tag === "drag" || tag === "replace") {
-          setSlot(p[2].split(":")[0], p[3], p[4] || "100/100");
-          if (tag !== "replace") log.push(`${names[p[2].slice(0, 2)]} sent out ${nick(p[2])}.`);
-        }
-        else if (tag === "detailschange" || tag === "-formechange") {
-          const { side, pos } = slotOf(p[2].split(":")[0]);
-          if (sides[side][pos]) sides[side][pos]!.species = p[3].split(",")[0];
-        }
-        else if (tag === "-damage" || tag === "-heal" || tag === "-sethp") updateCond(p[2].split(":")[0], p[3]);
-        else if (tag === "faint") {
-          const { side, pos } = slotOf(p[2].split(":")[0]);
-          if (sides[side][pos]) { sides[side][pos]!.fainted = true; sides[side][pos]!.hpPct = 0; }
-          log.push(`${nick(p[2])} fainted.`);
-        }
-        else if (tag === "move") log.push(`${nick(p[2])} used ${p[3]}.`);
-        else if (tag === "-status") log.push(`${nick(p[2])} was ${STATUS_TEXT[p[3]] ?? p[3]}.`);
-        else if (tag === "-terastallize") log.push(`${nick(p[2])} Terastallized to ${p[3]}!`);
-        else if (tag === "-mega") log.push(`${nick(p[2])} Mega Evolved!`);
-        else if (tag === "turn") { turn = Number(p[2]); log.push(`— Turn ${turn} —`); }
-        else if (tag === "win") { winner = p[2]?.trim() || null; ended = true; }
-        else if (tag === "tie") { winner = "tie"; ended = true; }
-      }
-   } catch { /* stream destroyed after snapshot */ }
-  })();
-
-  streams.omniscient.write(commands.join("\n"));
-  await new Promise((r) => setTimeout(r, 50)); // let the in-memory engine drain
-  try { (streams.omniscient as unknown as { destroy?: () => void }).destroy?.(); } catch { /* ignore */ }
-  void consume;
-
-  const near = viewer === "spectator" ? "p1" : viewer;
-  const far = near === "p1" ? "p2" : "p1";
-  // A request is only actionable when it isn't a wait. (cast: TS can't see the
-  // closure mutation above, so it would otherwise narrow `request` to null.)
-  const r = request as Request | null;
-  const actionable = r && !r.wait ? r : null;
-  return {
-    turn, ended, winner, viewer, request: actionable,
-    near: { name: names[near], active: sides[near] },
-    far: { name: names[far], active: sides[far] },
-    log,
-  };
+// Turn the omniscient protocol log into a few human-readable lines.
+function readableLog(log: readonly string[]): string[] {
+  const names: Record<string, string> = {};
+  const out: string[] = [];
+  for (const line of log) {
+    if (!line.startsWith("|")) continue;
+    const p = line.split("|");
+    switch (p[1]) {
+      case "player": if (p[2] && p[3]) names[p[2]] = p[3]; break;
+      case "switch": case "drag": out.push(`${names[p[2].slice(0, 2)] ?? ""} sent out ${nick(p[2])}.`.trimStart()); break;
+      case "faint": out.push(`${nick(p[2])} fainted.`); break;
+      case "move": out.push(`${nick(p[2])} used ${p[3]}.`); break;
+      case "-status": out.push(`${nick(p[2])} was ${STATUS_TEXT[p[3]] ?? p[3]}.`); break;
+      case "-terastallize": out.push(`${nick(p[2])} Terastallized to ${p[3]}!`); break;
+      case "-mega": out.push(`${nick(p[2])} Mega Evolved!`); break;
+      case "turn": out.push(`— Turn ${p[2]} —`); break;
+    }
+  }
+  return out;
 }
 
-// True when this request needs the viewer to make a choice.
-export const needsChoice = (r: Request | null) =>
-  Boolean(r && !r.wait && (r.teamPreview || r.forceSwitch?.some(Boolean) || r.active?.some(Boolean)));
+// Replay a battle from teams + seed + ordered choices using the real engine, and
+// return the viewer's authoritative point of view. The Battle object's per-side
+// isChoiceDone()/requestState tells us reliably whether the viewer still owes a
+// choice — the streamed protocol can't (it never emits "wait" in batch replay).
+export function replay(
+  input: { formatid: string; p1: { name: string; team: string }; p2: { name: string; team: string }; seed: number[]; choices: ChoiceEntry[] },
+  viewer: Viewer,
+): BattleSnapshot {
+  const battle = new Battle({ formatid: input.formatid, seed: input.seed } as unknown as ConstructorParameters<typeof Battle>[0]);
+  battle.setPlayer("p1", { name: input.p1.name, team: input.p1.team });
+  battle.setPlayer("p2", { name: input.p2.name, team: input.p2.team });
+  for (const c of input.choices) {
+    try { battle.choose(c.side as PlayerSide, c.choice); } catch { /* skip invalid (stale) choice */ }
+  }
+
+  const sideView = (idx: number): SideView => ({
+    name: battle.sides[idx].name,
+    active: battle.sides[idx].active.map((mon) => mon ? {
+      species: mon.species.name,
+      hpPct: mon.maxhp ? Math.max(0, Math.round((mon.hp / mon.maxhp) * 100)) : (mon.fainted ? 0 : 100),
+      fainted: mon.fainted,
+      status: mon.status || "",
+    } : null),
+  });
+
+  const nearIdx = viewer === "p2" ? 1 : 0;
+  const vSide = viewer === "spectator" ? null : battle.sides[nearIdx];
+  const owes = !!vSide && !vSide.isChoiceDone() && vSide.requestState !== "";
+  const ended = !!battle.ended;
+
+  return {
+    turn: battle.turn,
+    ended,
+    winner: ended ? (battle.winner || "tie") : null,
+    viewer,
+    request: (vSide?.activeRequest ?? null) as Request | null,
+    owes,
+    near: sideView(nearIdx),
+    far: sideView(nearIdx === 0 ? 1 : 0),
+    log: readableLog(battle.log),
+  };
+}
 
 export type PlayerSpec = { name: string; team: string }; // team = packed string
 

@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  getLeagueByCode, getRoomState, createBattle, listBattles,
+  getLeagueByCode, getRoomState, createBattle, listBattles, getIdentity,
   type Coach, type Battle, type League,
 } from "@/lib/db";
 import { teamToShowdown, setReady } from "@/lib/teambuilder";
@@ -20,9 +20,12 @@ export default function Play({ code }: { code: string }) {
   const [battles, setBattles] = useState<Battle[]>([]);
   const [p1, setP1] = useState("");
   const [p2, setP2] = useState("");
+  const [oppTeam, setOppTeam] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [fatal, setFatal] = useState("");
+  const identity = useMemo(() => getIdentity(code), [code]);
+  const myCoach = coaches.find((c) => c.id === identity?.coachId) ?? null;
 
   async function load() {
     const lg = await getLeagueByCode(code);
@@ -33,6 +36,8 @@ export default function Play({ code }: { code: string }) {
     setBattles(bs);
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [code]);
+  // Default the AI opponent to your own team (a mirror match) so practice is one click.
+  useEffect(() => { if (!oppTeam && myCoach && teamReady(myCoach)) setOppTeam(myCoach.id); }, [coaches]); // eslint-disable-line
 
   async function start() {
     setError("");
@@ -61,6 +66,30 @@ export default function Play({ code }: { code: string }) {
     }
   }
 
+  async function startPractice() {
+    setError("");
+    if (!league) return;
+    if (!myCoach) return setError("Join this league as a coach (from the room) to practice.");
+    if (!teamReady(myCoach)) return setError("Build a battle-ready team first (Team page).");
+    const opp = coaches.find((c) => c.id === oppTeam);
+    if (!opp || !teamReady(opp)) return setError("Pick the AI opponent's team.");
+    setBusy(true);
+    try {
+      const { packTeam } = await import("@/lib/battle");
+      const battle = await createBattle({
+        leagueId: league.id,
+        format: league.battle_format ?? "doubles",
+        p1: { coachId: myCoach.id, name: myCoach.name, team: packTeam(teamToShowdown(myCoach.team!)) },
+        p2: { coachId: null, name: "Computer", team: packTeam(teamToShowdown(opp.team!)) },
+        seed: [rand(), rand(), rand(), rand()],
+      });
+      router.push(`/battle/${battle.id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start practice.");
+      setBusy(false);
+    }
+  }
+
   if (!supabaseReady) return <Centered>Supabase isn&apos;t connected.</Centered>;
   if (fatal) return <Centered>{fatal} <Link href="/" className="text-coral underline">Home</Link></Centered>;
   if (!league) return <Centered><span className="hand text-3xl text-coral">loading…</span></Centered>;
@@ -78,6 +107,28 @@ export default function Play({ code }: { code: string }) {
         <div className="flex gap-2">
           <Link href={`/team/${code}`} className="btn btn-ghost text-sm py-2">Team</Link>
           <Link href={`/room/${code}`} className="btn btn-ghost text-sm py-2">← Room</Link>
+        </div>
+      </div>
+
+      {/* Practice vs AI — solo testing */}
+      <div className="paper p-5 mb-4" style={{ borderTop: "4px solid var(--teal)" }}>
+        <h2 className="font-display font-bold mb-1">⚡ Practice vs AI</h2>
+        <p className="text-xs text-ink-soft mb-3">
+          Play a battle solo — you control {myCoach ? <b className="text-ink">{myCoach.name}</b> : "your team"}, the computer plays the other side.
+        </p>
+        <div className="grid sm:grid-cols-2 gap-3 items-end">
+          <label className="block">
+            <span className="text-xs font-semibold text-ink-soft">AI opponent&apos;s team</span>
+            <select className="w-full mt-1 bg-white/60 rounded px-2 py-2 outline-none" value={oppTeam} onChange={(e) => setOppTeam(e.target.value)}>
+              <option value="">Choose…</option>
+              {coaches.filter(teamReady).map((c) => (
+                <option key={c.id} value={c.id}>{c.name}{c.id === myCoach?.id ? " (mirror)" : ""}</option>
+              ))}
+            </select>
+          </label>
+          <button className="btn btn-teal w-full" onClick={startPractice} disabled={busy || !myCoach}>
+            {busy ? "Starting…" : "Start practice"}
+          </button>
         </div>
       </div>
 

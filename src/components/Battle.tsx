@@ -9,7 +9,7 @@ import {
   type Battle as BattleRow, type BattleChoice, type BattleFormat,
 } from "@/lib/db";
 import {
-  setupCommands, replay, needsChoice, type BattleSnapshot, type Viewer, type Request, type Slot,
+  replay, type BattleSnapshot, type Viewer, type Request, type Slot,
 } from "@/lib/battle";
 
 const NEED_TARGET = new Set(["normal", "any", "adjacentFoe"]);
@@ -27,6 +27,10 @@ export default function Battle({ id }: { id: string }) {
   const [fatal, setFatal] = useState("");
   const [code, setCode] = useState("");
   const reported = useRef(false);
+  const runRef = useRef<() => void>(() => {});
+  // Re-sync shortly after our own writes — realtime can race read-after-write,
+  // which otherwise leaves the AI (or our view) stuck on a stale replay.
+  const scheduleSync = () => setTimeout(() => runRef.current(), 500);
 
   // Initial load: identify the viewer + sprite map.
   useEffect(() => {
@@ -49,11 +53,11 @@ export default function Battle({ id }: { id: string }) {
     const run = async () => {
       const [b, ch] = await Promise.all([getBattle(id), getBattleChoices(id)]);
       if (!b || cancelled) return;
-      const commands = [
-        ...setupCommands(engineFormat(b.format as BattleFormat), { name: b.p1_name, team: b.p1_team }, { name: b.p2_name, team: b.p2_team }, b.seed),
-        ...ch.map((c) => `>${c.side} ${c.choice}`),
-      ];
-      const s = await replay(commands, viewer);
+      const s = replay({
+        formatid: engineFormat(b.format as BattleFormat),
+        p1: { name: b.p1_name, team: b.p1_team }, p2: { name: b.p2_name, team: b.p2_team },
+        seed: b.seed, choices: ch.map((c) => ({ side: c.side, choice: c.choice })),
+      }, viewer);
       if (cancelled) return;
       setBattle(b); setChoices(ch); setSnap(s); setPending({}); setGimmick({});
 
@@ -67,12 +71,40 @@ export default function Battle({ id }: { id: string }) {
         const winnerCoachId = w === b.p1_name ? b.p1_coach_id : b.p2_coach_id;
         if (winnerCoachId) await reportMatchResult(b.league_id, b.match_id, winnerCoachId);
       }
+
     };
+    runRef.current = run;
     run();
     const unsub = subscribeBattle(id, run);
     return () => { cancelled = true; unsub(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [battle?.id, viewer]);
+
+  // Practice mode: the player's browser auto-plays the AI opponent (p2). A poll
+  // (rather than a realtime trigger) makes this robust to read-after-write races —
+  // it submits exactly when p2 has an outstanding request (action count > choices made).
+  useEffect(() => {
+    if (!battle || battle.p2_coach_id !== null || viewer !== "p1") return;
+    let busy = false;
+    const tick = async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        const b = await getBattle(id);
+        if (!b || b.status !== "active") return;
+        const ch = await getBattleChoices(id);
+        const p2 = replay({
+          formatid: engineFormat(b.format as BattleFormat),
+          p1: { name: b.p1_name, team: b.p1_team }, p2: { name: b.p2_name, team: b.p2_team },
+          seed: b.seed, choices: ch.map((c) => ({ side: c.side, choice: c.choice })),
+        }, "p2");
+        if (p2.owes) await submitChoice(id, "p2", ch.filter((c) => c.side === "p2").length, "default");
+      } finally { busy = false; }
+    };
+    const iv = setInterval(tick, 900);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [battle?.id, battle?.p2_coach_id, viewer]);
 
   if (fatal) return <Centered>{fatal} <Link href="/" className="text-coral underline">Home</Link></Centered>;
   if (!snap || !battle) return <Centered><span className="hand text-3xl text-coral">entering the battle…</span></Centered>;
@@ -83,8 +115,8 @@ export default function Battle({ id }: { id: string }) {
   const ended = snap.ended || battle.status === "done";
   const winner = snap.winner ?? battle.winner;
   const aliveFoes = snap.far.active.filter((s) => s && !s.fainted).length;
-  const iMustChoose = isPlayer && !ended && needsChoice(req) && !req?.teamPreview;
-  const inTeamPreview = isPlayer && !ended && req?.teamPreview && myChoiceCount === 0;
+  const iMustChoose = isPlayer && !ended && snap.owes && !req?.teamPreview;
+  const inTeamPreview = isPlayer && !ended && snap.owes && Boolean(req?.teamPreview);
 
   // Which active slots need a decision this request.
   const activeSlots: number[] = [];
@@ -119,6 +151,7 @@ export default function Battle({ id }: { id: string }) {
       return `move ${c.index}${c.moveTarget ? ` ${c.moveTarget}` : ""}${g}`;
     }).join(", ");
     await submitChoice(id, viewer as string, myChoiceCount, cmd);
+    scheduleSync();
   }
   async function submitLeads(order: number[]) {
     if (!req?.side) return;
@@ -126,11 +159,13 @@ export default function Battle({ id }: { id: string }) {
     const full = [...order, ...all.filter((n) => !order.includes(n))];
     const bring = battle!.format === "singles" ? all.length : 4;
     await submitChoice(id, viewer as string, 0, "team " + full.slice(0, bring).join(""));
+    scheduleSync();
   }
   async function forfeit() {
     if (!isPlayer || ended) return;
     if (!confirm("Forfeit this battle?")) return;
     await finishBattle(id, viewer === "p1" ? battle!.p2_name : battle!.p1_name);
+    scheduleSync();
   }
 
   const benched = (req?.side?.pokemon ?? [])
@@ -345,11 +380,12 @@ function TeamPreview({ req, format, onConfirm }: { req: Request; format: string;
   const [order, setOrder] = useState<number[]>([]);
   const mons = req.side?.pokemon ?? [];
   const doubles = format !== "singles";
-  const toggle = (n: number) => setOrder((o) => (o.includes(n) ? o.filter((x) => x !== n) : doubles && o.length >= 4 ? o : [...o, n]));
+  const bring = doubles ? Math.min(4, mons.length) : mons.length;
+  const toggle = (n: number) => setOrder((o) => (o.includes(n) ? o.filter((x) => x !== n) : doubles && o.length >= bring ? o : [...o, n]));
   return (
     <div>
       <p className="text-sm font-semibold mb-2 text-center">
-        {doubles ? "Pick the 4 you'll bring — tap in order (first 2 lead)" : "Tap your lead, then the rest in order (optional)"}
+        {doubles ? `Pick the ${bring} you'll bring — tap in order (first 2 lead)` : "Tap your lead, then the rest in order (optional)"}
       </p>
       <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
         {mons.map((p, i) => {
@@ -367,8 +403,8 @@ function TeamPreview({ req, format, onConfirm }: { req: Request; format: string;
           );
         })}
       </div>
-      <button className="btn btn-coral w-full mt-3" disabled={doubles && order.length < 4} onClick={() => onConfirm(order)}>
-        {doubles ? (order.length < 4 ? `Pick ${4 - order.length} more` : "Bring these 4") : "Start battle"}
+      <button className="btn btn-coral w-full mt-3" disabled={doubles && order.length < bring} onClick={() => onConfirm(order)}>
+        {doubles ? (order.length < bring ? `Pick ${bring - order.length} more` : `Bring these ${bring}`) : "Start battle"}
       </button>
     </div>
   );
