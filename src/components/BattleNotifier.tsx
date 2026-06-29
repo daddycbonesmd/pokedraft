@@ -1,45 +1,78 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { myLeagueCodes, getIdentity, getLeagueByCode, subscribeLeagueBattles } from "@/lib/db";
+import { myLeagueCodes, getIdentity, getLeagueByCode, subscribeLeagueBattles, listBattles, type Battle } from "@/lib/db";
 import { supabaseReady } from "@/lib/supabase";
 
 type Invite = { id: string; vs: string; me: string };
 
-// Mounted globally: pops a toast on any screen when someone starts a battle that
-// has you in it (skips practice-vs-AI and battles you're already viewing).
+// Mounted globally: pops a toast on any screen when there's an active battle that
+// has you in it (skips practice-vs-AI and battles you're already viewing). Works
+// three ways so an invite is never missed: an initial scan of active battles, a
+// realtime INSERT subscription for instant delivery, and a slow poll as a fallback
+// in case realtime is unavailable or you opened the app after the invite was sent.
 export default function BattleNotifier() {
   const pathname = usePathname();
   const [invites, setInvites] = useState<Invite[]>([]);
+  const dismissed = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!supabaseReady) return;
     let cancelled = false;
     const unsubs: (() => void)[] = [];
-    (async () => {
+
+    // Resolve my (code → coachId, leagueId) once; reused by scan + subscribe.
+    const myLeagues = async () => {
+      const out: { leagueId: string; coachId: string }[] = [];
       for (const code of myLeagueCodes()) {
         const id = getIdentity(code);
         if (!id) continue;
         let leagueId: string | undefined;
         try { leagueId = (await getLeagueByCode(code))?.id; } catch { /* ignore */ }
-        if (!leagueId || cancelled) continue;
-        unsubs.push(subscribeLeagueBattles(leagueId, (b) => {
-          const meP1 = b.p1_coach_id === id.coachId, meP2 = b.p2_coach_id === id.coachId;
-          if ((!meP1 && !meP2) || b.p2_coach_id === null) return;          // not mine, or vs AI
-          if (typeof window !== "undefined" && window.location.pathname.includes(b.id)) return; // already there
-          setInvites((prev) => prev.some((x) => x.id === b.id) ? prev : [...prev, { id: b.id, vs: meP1 ? b.p2_name : b.p1_name, me: meP1 ? b.p1_name : b.p2_name }]);
-        }));
+        if (leagueId) out.push({ leagueId, coachId: id.coachId });
       }
+      return out;
+    };
+
+    const consider = (b: Battle, coachId: string) => {
+      const meP1 = b.p1_coach_id === coachId, meP2 = b.p2_coach_id === coachId;
+      if ((!meP1 && !meP2) || b.p2_coach_id === null) return;            // not mine, or vs AI
+      if (b.status !== "active") return;                                  // already finished
+      if (dismissed.current.has(b.id)) return;                            // user closed it
+      if (typeof window !== "undefined" && window.location.pathname.includes(b.id)) return; // already there
+      setInvites((prev) => prev.some((x) => x.id === b.id) ? prev
+        : [...prev, { id: b.id, vs: meP1 ? b.p2_name : b.p1_name, me: meP1 ? b.p1_name : b.p2_name }]);
+    };
+
+    const scan = async (leagues: { leagueId: string; coachId: string }[]) => {
+      for (const { leagueId, coachId } of leagues) {
+        let battles: Battle[] = [];
+        try { battles = await listBattles(leagueId); } catch { /* ignore */ }
+        if (cancelled) return;
+        for (const b of battles) consider(b, coachId);
+      }
+    };
+
+    (async () => {
+      const leagues = await myLeagues();
+      if (cancelled) return;
+      await scan(leagues);                                                // 1) catch existing invites
+      for (const { leagueId, coachId } of leagues) {                      // 2) instant on new inserts
+        unsubs.push(subscribeLeagueBattles(leagueId, (b) => consider(b, coachId)));
+      }
+      const poll = setInterval(() => { void scan(leagues); }, 15000);     // 3) fallback poll
+      unsubs.push(() => clearInterval(poll));
     })();
+
     return () => { cancelled = true; unsubs.forEach((u) => u()); };
   }, []);
 
   // Clear an invite once you're on its battle page.
   useEffect(() => { setInvites((prev) => prev.filter((i) => !pathname.includes(i.id))); }, [pathname]);
 
-  const dismiss = (id: string) => setInvites((p) => p.filter((x) => x.id !== id));
+  const dismiss = (id: string) => { dismissed.current.add(id); setInvites((p) => p.filter((x) => x.id !== id)); };
   if (!invites.length) return null;
 
   return (
