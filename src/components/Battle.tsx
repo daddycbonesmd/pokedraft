@@ -137,6 +137,7 @@ export default function Battle({ id }: { id: string }) {
   const ended = snap.ended || battle.status === "done";
   const winner = snap.winner ?? battle.winner;
   const aliveFoes = snap.far.active.filter((s) => s && !s.fainted).length;
+  const isDoubles = battle.format !== "singles";
   const iMustChoose = isPlayer && !ended && snap.owes && !req?.teamPreview;
   const inTeamPreview = isPlayer && !ended && snap.owes && Boolean(req?.teamPreview);
 
@@ -156,8 +157,17 @@ export default function Battle({ id }: { id: string }) {
   const allChosen = activeSlots.every(slotComplete);
 
   function chooseMove(slot: number, moveIndex: number, target: string) {
-    const needTarget = NEED_TARGET.has(target) && aliveFoes > 1;
-    setPending((p) => ({ ...p, [slot]: { kind: "move", index: moveIndex, moveTarget: "", needTarget } }));
+    // In doubles a single-target move must carry an explicit target — otherwise a
+    // trailing gimmick token (mega/terastallize) gets misparsed as the target.
+    const singleTarget = isDoubles && NEED_TARGET.has(target);
+    if (singleTarget && aliveFoes > 1) {
+      setPending((p) => ({ ...p, [slot]: { kind: "move", index: moveIndex, moveTarget: "", needTarget: true } }));
+    } else if (singleTarget) {
+      const idx = snap!.far.active.findIndex((s) => s && !s.fainted); // exactly one foe — auto-target it
+      setPending((p) => ({ ...p, [slot]: { kind: "move", index: moveIndex, moveTarget: String((idx < 0 ? 0 : idx) + 1), needTarget: false } }));
+    } else {
+      setPending((p) => ({ ...p, [slot]: { kind: "move", index: moveIndex, moveTarget: "", needTarget: false } }));
+    }
   }
   function chooseTarget(slot: number, foeIndex: number) {
     setPending((p) => { const c = p[slot]; if (c?.kind !== "move") return p; return { ...p, [slot]: { ...c, moveTarget: String(foeIndex + 1) } }; });

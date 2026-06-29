@@ -11,7 +11,6 @@ import { teamToShowdown, setReady } from "@/lib/teambuilder";
 import { supabaseReady } from "@/lib/supabase";
 
 const rand = () => Math.floor(Math.random() * 65536);
-const teamReady = (c: Coach) => Array.isArray(c.team) && c.team.some(setReady);
 
 export default function Play({ code }: { code: string }) {
   const router = useRouter();
@@ -27,6 +26,9 @@ export default function Play({ code }: { code: string }) {
   const identity = useMemo(() => getIdentity(code), [code]);
   const myCoach = coaches.find((c) => c.id === identity?.coachId) ?? null;
   const busyRef = useRef(false); // hard guard against double-clicks creating duplicate battles
+  // Doubles needs 2 active Pokémon — a 1-mon doubles team crashes the engine.
+  const minMons = (league?.battle_format ?? "doubles") === "singles" ? 1 : 2;
+  const canBattle = (c: Coach) => Array.isArray(c.team) && c.team.filter(setReady).length >= minMons;
 
   async function load() {
     const lg = await getLeagueByCode(code);
@@ -40,7 +42,7 @@ export default function Play({ code }: { code: string }) {
   // Warm the heavy battle engine bundle in the background so "Start" is instant.
   useEffect(() => { import("@/lib/battle").catch(() => {}); }, []);
   // Default the AI opponent to your own team (a mirror match) so practice is one click.
-  useEffect(() => { if (!oppTeam && myCoach && teamReady(myCoach)) setOppTeam(myCoach.id); }, [coaches]); // eslint-disable-line
+  useEffect(() => { if (!oppTeam && myCoach && canBattle(myCoach)) setOppTeam(myCoach.id); }, [coaches]); // eslint-disable-line
 
   async function start() {
     setError("");
@@ -49,7 +51,7 @@ export default function Play({ code }: { code: string }) {
     const c1 = coaches.find((c) => c.id === p1);
     const c2 = coaches.find((c) => c.id === p2);
     if (!c1 || !c2) return setError("Pick two coaches.");
-    if (!teamReady(c1) || !teamReady(c2)) return setError("Both coaches need a battle-ready team (build one on the Team page).");
+    if (!canBattle(c1) || !canBattle(c2)) return setError(`Both coaches need ${minMons}+ battle-ready Pokémon for ${league.battle_format ?? "doubles"}.`);
     busyRef.current = true;
     setBusy(true);
     try {
@@ -74,9 +76,9 @@ export default function Play({ code }: { code: string }) {
     setError("");
     if (busyRef.current || !league) return;
     if (!myCoach) return setError("Join this league as a coach (from the room) to practice.");
-    if (!teamReady(myCoach)) return setError("Build a battle-ready team first (Team page).");
+    if (!canBattle(myCoach)) return setError(`Build a team with ${minMons}+ ready Pokémon first (Team page).`);
     const opp = coaches.find((c) => c.id === oppTeam);
-    if (!opp || !teamReady(opp)) return setError("Pick the AI opponent's team.");
+    if (!opp || !canBattle(opp)) return setError(`Pick an AI opponent with ${minMons}+ ready Pokémon.`);
     busyRef.current = true;
     setBusy(true);
     try {
@@ -138,7 +140,7 @@ export default function Play({ code }: { code: string }) {
             <span className="text-xs font-semibold text-ink-soft">AI opponent&apos;s team</span>
             <select className="w-full mt-1 bg-white/60 rounded px-2 py-2 outline-none" value={oppTeam} onChange={(e) => setOppTeam(e.target.value)}>
               <option value="">Choose…</option>
-              {coaches.filter(teamReady).map((c) => (
+              {coaches.filter(canBattle).map((c) => (
                 <option key={c.id} value={c.id}>{c.name}{c.id === myCoach?.id ? " (mirror)" : ""}</option>
               ))}
             </select>
@@ -153,8 +155,8 @@ export default function Play({ code }: { code: string }) {
       <div className="paper p-5">
         <h2 className="font-display font-bold mb-3">Start a battle</h2>
         <div className="grid sm:grid-cols-2 gap-3">
-          <CoachPick label="Player 1" coaches={coaches} value={p1} onChange={setP1} />
-          <CoachPick label="Player 2" coaches={coaches} value={p2} onChange={setP2} />
+          <CoachPick label="Player 1" coaches={coaches} value={p1} onChange={setP1} ready={canBattle} />
+          <CoachPick label="Player 2" coaches={coaches} value={p2} onChange={setP2} ready={canBattle} />
         </div>
         {error && <p className="text-coral text-sm mt-2">{error}</p>}
         <button className="btn btn-coral w-full mt-3" onClick={start} disabled={busy}>
@@ -180,15 +182,15 @@ export default function Play({ code }: { code: string }) {
   );
 }
 
-function CoachPick({ label, coaches, value, onChange }: { label: string; coaches: Coach[]; value: string; onChange: (v: string) => void }) {
+function CoachPick({ label, coaches, value, onChange, ready }: { label: string; coaches: Coach[]; value: string; onChange: (v: string) => void; ready: (c: Coach) => boolean }) {
   return (
     <label className="block">
       <span className="text-xs font-semibold text-ink-soft">{label}</span>
       <select className="w-full mt-1 bg-white/60 rounded px-2 py-2 outline-none" value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">Choose…</option>
         {coaches.map((c) => (
-          <option key={c.id} value={c.id} disabled={!teamReady(c)}>
-            {c.name}{teamReady(c) ? "" : " (no team)"}
+          <option key={c.id} value={c.id} disabled={!ready(c)}>
+            {c.name}{ready(c) ? "" : " (not ready)"}
           </option>
         ))}
       </select>

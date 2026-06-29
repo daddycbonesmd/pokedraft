@@ -92,8 +92,9 @@ export default function TournamentView({ code }: { code: string }) {
     const ca = coaches.find((c) => c.id === aId);
     const cb = coaches.find((c) => c.id === bId);
     if (!ca || !cb) return;
-    const aReady = ca.team?.some(setReady), bReady = cb.team?.some(setReady);
-    if (!aReady || !bReady) { setError(`${!aReady ? ca.name : cb.name} hasn't built a battle-ready team yet.`); return; }
+    const need = (league?.battle_format ?? "doubles") === "singles" ? 1 : 2;
+    const aReady = (ca.team?.filter(setReady).length ?? 0) >= need, bReady = (cb.team?.filter(setReady).length ?? 0) >= need;
+    if (!aReady || !bReady) { setError(`${!aReady ? ca.name : cb.name} needs ${need}+ battle-ready Pokémon for ${league?.battle_format ?? "doubles"}.`); return; }
     try {
       const existing = await getBattleByMatch(league!.id, m.id);
       if (existing) { router.push(`/battle/${existing.id}`); return; }
