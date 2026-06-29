@@ -380,7 +380,7 @@ export default function Battle({ id }: { id: string }) {
             {!winner || winner === "tie" ? "It's a tie!" : `${winner} wins!`}
           </p>
         ) : inTeamPreview ? (
-          <TeamPreview req={req!} format={battle.format} onConfirm={submitLeads} />
+          <TeamPreview req={req!} format={battle.format} onConfirm={submitLeads} farTeam={snap.farTeam} farName={snap.far.name} dex={dex} />
         ) : viewer === "spectator" ? (
           <p className="text-center text-ink-soft">Spectating · turn {snap.turn}</p>
         ) : req?.teamPreview ? (
@@ -699,7 +699,37 @@ function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, move
   );
 }
 
-function TeamPreview({ req, format, onConfirm }: { req: Request; format: string; onConfirm: (order: number[]) => void }) {
+// A single Pokémon thumbnail with a hover dossier — used to scout both teams on
+// the Team Preview screen.
+function PreviewMon({ species, level, dex, facing, badge, outline, onClick }: {
+  species: string; level: number; dex: Map<string, PokeMon>; facing: "front" | "back";
+  badge?: number; outline?: boolean; onClick?: () => void;
+}) {
+  const url = (Sprites.getPokemon(species, { gen: "ani", side: facing === "front" ? "p2" : "p1" }) as { url: string }).url;
+  const mon = { species, level, hpPct: 100, fainted: false, status: "", tera: "", boosts: {} };
+  const inner = (
+    <>
+      {badge != null && <span className="absolute top-0 left-0 z-10 bg-coral text-white text-[10px] font-bold w-4 h-4 grid place-items-center rounded-br">{badge}</span>}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={url} alt={species} className="h-12" style={{ imageRendering: "pixelated" }} />
+      <div className="text-[10px] truncate w-full text-center">{species}</div>
+      <div className={`pointer-events-none absolute z-40 left-1/2 -translate-x-1/2 hidden group-hover:block ${facing === "front" ? "top-full mt-1" : "bottom-full mb-1"}`}>
+        <MonTooltip mon={mon} info={dex.get(toID(species))} side={facing === "front" ? "foe" : "ally"} />
+      </div>
+    </>
+  );
+  return onClick ? (
+    <button onClick={onClick} className="paper p-1.5 relative group grid place-items-center"
+      style={{ outline: outline ? "2.5px solid var(--coral)" : "none" }}>{inner}</button>
+  ) : (
+    <div className="paper p-1.5 relative group grid place-items-center">{inner}</div>
+  );
+}
+
+function TeamPreview({ req, format, onConfirm, farTeam, farName, dex }: {
+  req: Request; format: string; onConfirm: (order: number[]) => void;
+  farTeam: { species: string; level: number }[]; farName: string; dex: Map<string, PokeMon>;
+}) {
   const [order, setOrder] = useState<number[]>([]);
   const mons = req.side?.pokemon ?? [];
   const doubles = format !== "singles";
@@ -707,6 +737,15 @@ function TeamPreview({ req, format, onConfirm }: { req: Request; format: string;
   const toggle = (n: number) => setOrder((o) => (o.includes(n) ? o.filter((x) => x !== n) : doubles && o.length >= bring ? o : [...o, n]));
   return (
     <div>
+      {/* Opponent's team — scout it before deciding your leads (hover for details). */}
+      {farTeam.length > 0 && (
+        <div className="mb-3 pb-3 border-b border-paper-edge">
+          <p className="text-[11px] font-bold text-ink-soft text-center mb-1.5">{farName}&apos;s team — hover to scout</p>
+          <div className="flex flex-wrap justify-center gap-2">
+            {farTeam.map((m, i) => <PreviewMon key={i} species={m.species} level={m.level} dex={dex} facing="front" />)}
+          </div>
+        </div>
+      )}
       <p className="text-sm font-semibold mb-2 text-center">
         {doubles ? `Pick the ${bring} you'll bring — tap in order (first 2 lead)` : "Tap your lead, then the rest in order (optional)"}
       </p>
@@ -714,15 +753,10 @@ function TeamPreview({ req, format, onConfirm }: { req: Request; format: string;
         {mons.map((p, i) => {
           const n = i + 1, pos = order.indexOf(n);
           const species = p.details.split(",")[0];
-          const url = (Sprites.getPokemon(species, { gen: "ani", side: "p1" }) as { url: string }).url;
+          const level = Number(p.details.match(/L(\d+)/)?.[1] ?? 50);
           return (
-            <button key={n} onClick={() => toggle(n)} className="paper p-1.5 relative grid place-items-center"
-              style={{ outline: pos >= 0 ? "2.5px solid var(--coral)" : "none" }}>
-              {pos >= 0 && <span className="absolute top-0 left-0 bg-coral text-white text-[10px] font-bold w-4 h-4 grid place-items-center rounded-br">{pos + 1}</span>}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={url} alt={species} className="h-12" style={{ imageRendering: "pixelated" }} />
-              <div className="text-[10px] truncate w-full text-center">{species}</div>
-            </button>
+            <PreviewMon key={n} species={species} level={level} dex={dex} facing="back"
+              badge={pos >= 0 ? pos + 1 : undefined} outline={pos >= 0} onClick={() => toggle(n)} />
           );
         })}
       </div>

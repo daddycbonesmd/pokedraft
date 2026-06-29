@@ -56,6 +56,7 @@ export type BattleSnapshot = {
   owes: boolean;           // whether the viewer must make a choice right now (authoritative)
   near: SideView;          // viewer's side
   far: SideView;           // opponent
+  farTeam: { species: string; level: number }[]; // opponent's full team (revealed at team preview)
   field: FieldState;       // weather / terrain / Trick Room
   log: string[];           // human-readable events
   raw: string[];           // raw Showdown protocol log (drives the animated playback timeline)
@@ -185,6 +186,9 @@ export function replay(
     owes,
     near: sideView(nearIdx),
     far: sideView(nearIdx === 0 ? 1 : 0),
+    // The opponent's whole team, the way classic Team Preview reveals it (species +
+    // level only — items/moves/spreads stay hidden until used).
+    farTeam: battle.sides[nearIdx === 0 ? 1 : 0].pokemon.map((p) => ({ species: p.species.name, level: p.level })),
     field: {
       weather: f.weather ? (WEATHER[f.weather] ?? f.weather) : "",
       terrain: f.terrain ? (TERRAIN[f.terrain] ?? f.terrain) : "",
