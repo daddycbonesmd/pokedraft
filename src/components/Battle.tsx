@@ -26,6 +26,40 @@ const prettyMax = (id: string) =>
 const CAT_ICON: Record<string, string> = { Physical: "●", Special: "◆", Status: "○" };
 const STAT_ORDER = ["hp", "atk", "def", "spa", "spd", "spe"] as const;
 const STAT_SHORT: Record<string, string> = { hp: "HP", atk: "Atk", def: "Def", spa: "SpA", spd: "SpD", spe: "Spe", accuracy: "Acc", evasion: "Eva" };
+// Volatile conditions worth surfacing on-sprite (keyed by the engine's volatile id).
+// Anything not listed (internal/duration markers) is ignored.
+const VOLATILE_LABELS: Record<string, { label: string; color: string }> = {
+  leechseed: { label: "Leech Seed", color: "#4a9e4a" },
+  confusion: { label: "Confused", color: "#b06bc7" },
+  taunt: { label: "Taunt", color: "#d24a3d" },
+  substitute: { label: "Substitute", color: "#7a7a7a" },
+  encore: { label: "Encore", color: "#d97aa8" },
+  disable: { label: "Disable", color: "#8a8a8a" },
+  yawn: { label: "Drowsy", color: "#5b9bd6" },
+  attract: { label: "Infatuated", color: "#e08ab8" },
+  curse: { label: "Cursed", color: "#5a4a6a" },
+  perishsong: { label: "Perish Song", color: "#3a3a44" },
+  aquaring: { label: "Aqua Ring", color: "#4f8fd6" },
+  ingrain: { label: "Ingrain", color: "#6a8a3a" },
+  torment: { label: "Torment", color: "#c0533f" },
+  partiallytrapped: { label: "Trapped", color: "#c98a2f" },
+  saltcure: { label: "Salt Cure", color: "#6b8a99" },
+  healblock: { label: "Heal Block", color: "#c0432f" },
+  nightmare: { label: "Nightmare", color: "#4a3a5a" },
+  magnetrise: { label: "Magnet Rise", color: "#e0b13a" },
+  telekinesis: { label: "Telekinesis", color: "#9a5aa8" },
+  powertrick: { label: "Power Trick", color: "#cc7a3a" },
+  gastroacid: { label: "Ability Off", color: "#8a8a8a" },
+  electrify: { label: "Electrified", color: "#e0b13a" },
+  foresight: { label: "Identified", color: "#888888" },
+  miracleeye: { label: "Identified", color: "#888888" },
+  smackdown: { label: "Grounded", color: "#cc9b53" },
+  tarshot: { label: "Tar Shot", color: "#4d433b" },
+  charge: { label: "Charged", color: "#e0b13a" },
+  protect: { label: "Protected", color: "#5aa653" },
+  endure: { label: "Enduring", color: "#b0a060" },
+};
+const volLabels = (vs: string[] | undefined) => (vs ?? []).map((v) => VOLATILE_LABELS[v]).filter(Boolean) as { label: string; color: string }[];
 const toID = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
 // Speed at level for the extreme spreads — slowest (0 IV/EV, −nature) to fastest
@@ -419,6 +453,7 @@ export default function Battle({ id }: { id: string }) {
 
 const hpColor = (p: number) => (p > 50 ? "#3fa84b" : p > 20 ? "#dca23e" : "#d9594c");
 const STATUS_COLOR: Record<string, string> = { brn: "#e0762f", par: "#d3aa2e", psn: "#9b5fb0", tox: "#9b5fb0", slp: "#8a8a8a", frz: "#5bb9d6" };
+const STATUS_TEXT: Record<string, string> = { brn: "Burned", par: "Paralyzed", psn: "Poisoned", tox: "Badly Poisoned", slp: "Asleep", frz: "Frozen" };
 
 function FieldChip({ children }: { children: React.ReactNode }) {
   return <span className="text-[10px] font-bold rounded-full px-2 py-0.5 bg-ink/80 text-paper shadow">{children}</span>;
@@ -450,16 +485,23 @@ function BattleMon({ mon, facing, attacking, tip }: { mon: NonNullable<Slot>; fa
   }, [attacking, facing, mon.fainted]);
 
   const boosts = Object.entries(mon.boosts ?? {}).filter(([, v]) => v !== 0);
+  const vols = volLabels(mon.volatiles);
 
   return (
     <div className="relative group" style={{ width: 96 }}>
-      {/* Persistent stat-stage notifier — always shows current boosts on the mon. */}
-      {boosts.length > 0 && !mon.fainted && (
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-0.5 pointer-events-none">
+      {/* Persistent on-sprite notifiers — stat stages + volatile conditions, always shown. */}
+      {(boosts.length > 0 || vols.length > 0) && !mon.fainted && (
+        <div className="absolute -top-1 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-0.5 pointer-events-none">
           {boosts.map(([k, v]) => (
             <span key={k} className="text-[8px] font-black rounded px-1 leading-snug shadow text-white whitespace-nowrap"
               style={{ background: v > 0 ? "#2f9e54" : "#d24a3d" }}>
               {STAT_SHORT[k] ?? k} {v > 0 ? "+" : ""}{v}
+            </span>
+          ))}
+          {vols.map((vl, i) => (
+            <span key={i} className="text-[8px] font-bold rounded px-1 leading-snug shadow text-white whitespace-nowrap"
+              style={{ background: vl.color }}>
+              {vl.label}
             </span>
           ))}
         </div>
@@ -520,6 +562,18 @@ function MonTooltip({ mon, info, revealed, side }: { mon: NonNullable<Slot>; inf
           <div className="opacity-90">Speed <b>{spMin}–{spMax}</b> <span className="opacity-60">(×1.5 scarf → {Math.floor(spMax * 1.5)})</span></div>
         </>
       ) : <div className="opacity-60">No dex data.</div>}
+      {(() => {
+        const conds: string[] = [];
+        if (mon.status) conds.push(STATUS_TEXT[mon.status] ?? mon.status);
+        for (const vl of volLabels(mon.volatiles)) conds.push(vl.label);
+        for (const [k, v] of Object.entries(mon.boosts ?? {})) if (v) conds.push(`${STAT_SHORT[k] ?? k} ${v > 0 ? "+" : ""}${v}`);
+        return conds.length > 0 ? (
+          <div className="mt-1.5 pt-1.5 border-t border-white/20">
+            <div className="opacity-60 text-[9px] font-bold uppercase mb-0.5">Conditions</div>
+            <div className="flex flex-wrap gap-1">{conds.map((c, i) => <span key={i} className="rounded bg-white/15 px-1.5 py-0.5">{c}</span>)}</div>
+          </div>
+        ) : null;
+      })()}
       {revealed && revealed.length > 0 && (
         <div className="mt-1.5 pt-1.5 border-t border-white/20">
           <div className="opacity-60 text-[9px] font-bold uppercase mb-0.5">{side === "foe" ? "Scouted moves" : "Moves revealed"}</div>
@@ -706,7 +760,7 @@ function PreviewMon({ species, level, dex, facing, badge, outline, onClick }: {
   badge?: number; outline?: boolean; onClick?: () => void;
 }) {
   const url = (Sprites.getPokemon(species, { gen: "ani", side: facing === "front" ? "p2" : "p1" }) as { url: string }).url;
-  const mon = { species, level, hpPct: 100, fainted: false, status: "", tera: "", boosts: {} };
+  const mon = { species, level, hpPct: 100, fainted: false, status: "", tera: "", boosts: {}, volatiles: [] };
   const inner = (
     <>
       {badge != null && <span className="absolute top-0 left-0 z-10 bg-coral text-white text-[10px] font-bold w-4 h-4 grid place-items-center rounded-br">{badge}</span>}

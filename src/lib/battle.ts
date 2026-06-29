@@ -44,6 +44,7 @@ export type Slot = {
   status: string;
   tera: string;
   boosts: Record<string, number>; // only non-zero stat stages (atk/def/spa/spd/spe/accuracy/evasion)
+  volatiles: string[];            // active volatile conditions (leechseed, confusion, taunt, …)
 } | null;
 export type SideView = { name: string; active: Slot[] };
 export type FieldState = { weather: string; terrain: string; trickRoom: boolean };
@@ -152,6 +153,7 @@ export function replay(
       boosts: Object.fromEntries(
         Object.entries((mon as unknown as { boosts?: Record<string, number> }).boosts ?? {}).filter(([, v]) => v !== 0),
       ),
+      volatiles: Object.keys((mon as unknown as { volatiles?: Record<string, unknown> }).volatiles ?? {}),
     } : null),
   });
 

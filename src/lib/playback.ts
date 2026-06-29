@@ -20,7 +20,7 @@ export type Step = {
   delayMs: number;         // how long to hold this step before the next
 };
 
-type Mon = { species: string; level: number; hpPct: number; fainted: boolean; status: string; tera: string; boosts: Record<string, number> };
+type Mon = { species: string; level: number; hpPct: number; fainted: boolean; status: string; tera: string; boosts: Record<string, number>; volatiles: Set<string> };
 
 const WEATHER: Record<string, string> = {
   sunnyday: "The sunlight turned harsh", raindance: "It started to rain", sandstorm: "A sandstorm kicked up",
@@ -42,6 +42,7 @@ const CANT: Record<string, string> = { par: "paralysis", slp: "sleep", frz: "bei
 const nick = (tag: string) => tag.split(": ")[1] ?? tag;
 const pos = (tag: string) => tag.slice(0, 3);
 const clean = (s: string) => (s || "").replace(/^(move|ability|item): /, "");
+const toID = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
 function parseCond(c: string): { hpPct: number; fainted: boolean; status: string } {
   if (!c) return { hpPct: 100, fainted: false, status: "" };
@@ -67,6 +68,7 @@ export function buildTimeline(raw: string[], viewer: Viewer): Step[] {
     return {
       species: m.species, level: m.level, hpPct: m.hpPct, fainted: m.fainted, status: m.status, tera: m.tera,
       boosts: Object.fromEntries(Object.entries(m.boosts).filter(([, v]) => v !== 0)),
+      volatiles: [...m.volatiles],
     };
   };
   const emit = (banner: string | null, tone: BannerTone, delayMs: number, attacker: string | null = null) => {
@@ -95,7 +97,7 @@ export function buildTimeline(raw: string[], viewer: Viewer): Step[] {
         const key = pos(p[2]);
         const lvl = Number(p[3]?.match(/L(\d+)/)?.[1] ?? 50);
         const cond = parseCond(p[4] ?? "");
-        model[key] = { species: nick(p[2]), level: lvl, hpPct: cond.hpPct, fainted: cond.fainted, status: cond.status, tera: "", boosts: {} };
+        model[key] = { species: nick(p[2]), level: lvl, hpPct: cond.hpPct, fainted: cond.fainted, status: cond.status, tera: "", boosts: {}, volatiles: new Set() };
         if (started) emit(`${names[key.slice(0, 2)] ?? ""} sent out ${nick(p[2])}!`.trimStart(), "info", 900);
         break;
       }
@@ -142,7 +144,7 @@ export function buildTimeline(raw: string[], viewer: Viewer): Step[] {
       case "-setboost": { const m = model[pos(p[2])]; if (m) m.boosts[p[3]] = Number(p[4]); emit(`${nick(p[2])}'s ${STAT_NAME[p[3]] ?? p[3]} changed!`, "boostUp", 700); break; }
       case "-clearboost": case "-clearnegativeboost": { const m = model[pos(p[2])]; if (m) m.boosts = {}; emit(`${nick(p[2])}'s stat changes were cleared!`, "info", 650); break; }
       case "-clearallboost": { for (const k of Object.keys(model)) if (model[k]) model[k]!.boosts = {}; emit("All stat changes were eliminated!", "info", 700); break; }
-      case "faint": { const m = model[pos(p[2])]; if (m) { m.fainted = true; m.hpPct = 0; } emit(`${nick(p[2])} fainted!`, "faint", 1200); break; }
+      case "faint": { const m = model[pos(p[2])]; if (m) { m.fainted = true; m.hpPct = 0; m.volatiles.clear(); } emit(`${nick(p[2])} fainted!`, "faint", 1200); break; }
       case "-weather": {
         if (p[3] === "[upkeep]") break;
         if (p[2] === "none") { field.weather = ""; emit("The weather cleared up.", "weather", 750); }
@@ -166,10 +168,13 @@ export function buildTimeline(raw: string[], viewer: Viewer): Step[] {
       case "-activate": { const eff = clean(p[3] ?? ""); if (eff) emit(/protect/i.test(eff) ? `${nick(p[2])} protected itself!` : `${nick(p[2])}: ${eff}!`, "info", 750); break; }
       case "-start": {
         const eff = clean(p[3] ?? "");
-        if (/^g?max$/i.test(eff) || /dynamax/i.test(eff)) emit(`${nick(p[2])} ${/gmax/i.test(eff) ? "Gigantamaxed" : "Dynamaxed"}!`, "field", 950);
-        else if (eff) emit(`${nick(p[2])}: ${eff}!`, "status", 800);
+        const m = model[pos(p[2])];
+        if (/^g?max$/i.test(eff) || /dynamax/i.test(eff)) { emit(`${nick(p[2])} ${/gmax/i.test(eff) ? "Gigantamaxed" : "Dynamaxed"}!`, "field", 950); break; }
+        if (m && eff) m.volatiles.add(toID(eff)); // persistent condition (Leech Seed, Confusion, Taunt, Substitute, …)
+        if (eff) emit(`${nick(p[2])}: ${eff}!`, "status", 800);
         break;
       }
+      case "-end": { const m = model[pos(p[2])]; const eff = clean(p[3] ?? ""); if (m && eff) m.volatiles.delete(toID(eff)); break; }
       case "-zpower": emit(`${nick(p[2])} surrounded itself with its Z-Power!`, "field", 900); break;
       case "-terastallize": { const m = model[pos(p[2])]; if (m) m.tera = p[3]; emit(`${nick(p[2])} Terastallized into ${p[3]}!`, "field", 950); break; }
       case "-mega": emit(`${nick(p[2])} Mega Evolved!`, "field", 950); break;
