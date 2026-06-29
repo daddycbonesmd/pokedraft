@@ -390,6 +390,16 @@ export async function reportMatchResult(leagueId: string, matchId: string, winne
   await saveTournament(leagueId, t);
 }
 
+// Notify when a new battle is created in a league (for the global invite toast).
+export function subscribeLeagueBattles(leagueId: string, onInsert: (b: Battle) => void) {
+  const channel = supabase
+    .channel(`league-battles:${leagueId}`)
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "battles", filter: `league_id=eq.${leagueId}` },
+      (payload) => onInsert(payload.new as Battle))
+    .subscribe();
+  return () => { supabase.removeChannel(channel); };
+}
+
 export function subscribeBattle(battleId: string, onChange: () => void) {
   const channel = supabase
     .channel(`battle:${battleId}`)

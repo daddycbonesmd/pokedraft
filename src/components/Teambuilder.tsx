@@ -76,6 +76,17 @@ export default function Teambuilder({ code }: { code: string }) {
   function update(monId: number, patch: Partial<BattleSet>) {
     setSets((s) => ({ ...s, [monId]: { ...s[monId], ...patch } }));
   }
+  // Fill every drafted Pokémon with its best (first) auto-set.
+  function autoFillAll() {
+    setSets((s) => {
+      const next = { ...s };
+      for (const m of mons ?? []) {
+        const r = roles[m.id]?.[0];
+        if (r) next[m.id] = setFromRole(m.id, next[m.id].species, r);
+      }
+      return next;
+    });
+  }
   function setMove(monId: number, i: number, value: string) {
     setSets((s) => {
       const moves = [...(s[monId].moves ?? [])];
@@ -125,6 +136,7 @@ export default function Teambuilder({ code }: { code: string }) {
           </p>
         </div>
         <div className="flex gap-2">
+          {mons.length > 0 && <button className="btn btn-coral text-sm py-2" onClick={autoFillAll} title="Fill every Pokémon with its best recommended set">⚡ Auto-fill all</button>}
           <button className="btn btn-ghost text-sm py-2" onClick={copyTeam}>{copied ? "Copied" : "Export"}</button>
           <Link href={`/room/${code}`} className="btn btn-ghost text-sm py-2">← Room</Link>
         </div>

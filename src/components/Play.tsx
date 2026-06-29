@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -26,6 +26,7 @@ export default function Play({ code }: { code: string }) {
   const [fatal, setFatal] = useState("");
   const identity = useMemo(() => getIdentity(code), [code]);
   const myCoach = coaches.find((c) => c.id === identity?.coachId) ?? null;
+  const busyRef = useRef(false); // hard guard against double-clicks creating duplicate battles
 
   async function load() {
     const lg = await getLeagueByCode(code);
@@ -41,12 +42,13 @@ export default function Play({ code }: { code: string }) {
 
   async function start() {
     setError("");
-    if (!league) return;
+    if (busyRef.current || !league) return;
     if (!p1 || !p2 || p1 === p2) return setError("Pick two different coaches.");
     const c1 = coaches.find((c) => c.id === p1);
     const c2 = coaches.find((c) => c.id === p2);
     if (!c1 || !c2) return setError("Pick two coaches.");
     if (!teamReady(c1) || !teamReady(c2)) return setError("Both coaches need a battle-ready team (build one on the Team page).");
+    busyRef.current = true;
     setBusy(true);
     try {
       const { packTeam } = await import("@/lib/battle");
@@ -62,17 +64,18 @@ export default function Play({ code }: { code: string }) {
       router.push(`/battle/${battle.id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not start the battle.");
-      setBusy(false);
+      setBusy(false); busyRef.current = false;
     }
   }
 
   async function startPractice() {
     setError("");
-    if (!league) return;
+    if (busyRef.current || !league) return;
     if (!myCoach) return setError("Join this league as a coach (from the room) to practice.");
     if (!teamReady(myCoach)) return setError("Build a battle-ready team first (Team page).");
     const opp = coaches.find((c) => c.id === oppTeam);
     if (!opp || !teamReady(opp)) return setError("Pick the AI opponent's team.");
+    busyRef.current = true;
     setBusy(true);
     try {
       const { packTeam } = await import("@/lib/battle");
@@ -86,7 +89,7 @@ export default function Play({ code }: { code: string }) {
       router.push(`/battle/${battle.id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not start practice.");
-      setBusy(false);
+      setBusy(false); busyRef.current = false;
     }
   }
 
@@ -96,6 +99,18 @@ export default function Play({ code }: { code: string }) {
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-8">
+      {busy && (
+        <div className="fixed inset-0 z-50 grid place-items-center" style={{ background: "rgba(44,39,34,0.55)", backdropFilter: "blur(2px)" }}>
+          <div className="paper p-6 text-center">
+            <div className="hand text-3xl text-coral mb-1">starting battle…</div>
+            <div className="text-sm text-ink-soft">loading the engine &amp; teams</div>
+            <div className="mt-3 h-1.5 w-48 mx-auto rounded-full overflow-hidden bg-black/10">
+              <div className="h-full w-1/3 rounded-full bg-coral" style={{ animation: "pbar 1s ease-in-out infinite" }} />
+            </div>
+          </div>
+          <style jsx>{`@keyframes pbar { 0% { transform: translateX(-120%); } 100% { transform: translateX(360%); } }`}</style>
+        </div>
+      )}
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="font-display text-3xl font-black">Battles</h1>
