@@ -56,7 +56,18 @@ const STATUS = ["Will-O-Wisp", "Thunder Wave", "Toxic", "Spore", "Sleep Powder",
 const SUPPORT = ["Fake Out", "Follow Me", "Rage Powder", "Helping Hand", "Reflect", "Light Screen", "Aurora Veil", "Tailwind", "Trick Room", "Icy Wind", "Electroweb", "Pollen Puff", "Heal Pulse", "Decorate", "Coaching", "Ally Switch", "Taunt"];
 const FIXED = ["Seismic Toss", "Night Shade", "Body Press"]; // damage without offense stats — good on walls
 // Moves to avoid auto-picking (recharge / two-turn / gimmick) unless nothing better.
-const BAD = new Set(["Hyper Beam", "Giga Impact", "Blast Burn", "Hydro Cannon", "Frenzy Plant", "Roar of Time", "Rock Wrecker", "Prismatic Laser", "Eternabeam", "Sky Attack", "Razor Wind", "Skull Bash", "Solar Beam", "Solar Blade", "Meteor Beam", "Bounce", "Sky Drop", "Last Resort", "Focus Punch", "Bide", "Spit Up", "Natural Gift", "Snore", "Sleep Talk", "Mirror Move", "Self-Destruct", "Explosion", "Final Gambit", "Memento", "Synchronoise", "Dream Eater", "Hyper Voice"]);
+const BAD = new Set([
+  // recharge / two-turn
+  "Hyper Beam", "Giga Impact", "Blast Burn", "Hydro Cannon", "Frenzy Plant", "Roar of Time", "Rock Wrecker", "Prismatic Laser", "Eternabeam",
+  "Sky Attack", "Razor Wind", "Skull Bash", "Solar Beam", "Solar Blade", "Meteor Beam", "Bounce", "Sky Drop", "Dig", "Dive", "Fly", "Phantom Force", "Shadow Force", "Geomancy",
+  // self-KO / heavy recoil
+  "Self-Destruct", "Explosion", "Misty Explosion", "Final Gambit", "Memento", "Steel Beam", "Mind Blown", "Chloroblast",
+  // need a setup/condition the default set won't provide
+  "Steel Roller", "Last Resort", "Focus Punch", "Bide", "Spit Up", "Swallow", "Stockpile", "Belch", "Stuff Cheeks", "Natural Gift", "Fling", "Snore", "Sleep Talk", "Dream Eater",
+  "Burn Up", "Double Shock", "Fillet Away", "Clangorous Soul", "No Retreat", "Beat Up", "Aurora Veil", "Acrobatics", "Hex", "Round", "Echoed Voice", "Rage Fist",
+  // unreliable / situational
+  "Mirror Move", "Synchronoise",
+]);
 
 // Build 1–3 role-appropriate auto-build sets for a Pokémon, best fit first.
 function synthSets(mon, moveNames) {
@@ -183,25 +194,26 @@ console.log(`Randbats roles for ${Object.keys(rolesOut).length} mons; synthesizi
 // ── movepools.json (full legal movepool per mon) ──
 console.log("Building legal movepools from @pkmn/dex learnsets…");
 const learnsetCache = new Map(); // learnsetId → string[] of display move names
+async function learnsetFor(id) {
+  if (learnsetCache.has(id)) return learnsetCache.get(id);
+  const ls = await Dex.learnsets.get(id);
+  const names = ls?.learnset
+    ? Object.keys(ls.learnset).map((mid) => Dex.moves.get(mid)).filter((mv) => mv && mv.exists && mv.name).map((mv) => mv.name)
+    : [];
+  learnsetCache.set(id, names);
+  return names;
+}
 async function legalMoves(speciesName) {
   const sp = Dex.species.get(speciesName);
   if (!sp || !sp.exists) return null;
-  // formes without their own learnset inherit the base species'
-  const candidates = [sp.id, toID(sp.baseSpecies)];
-  for (const id of candidates) {
-    if (learnsetCache.has(id)) return learnsetCache.get(id);
-    const ls = await Dex.learnsets.get(id);
-    if (ls && ls.learnset) {
-      const names = Object.keys(ls.learnset)
-        .map((mid) => Dex.moves.get(mid))
-        .filter((mv) => mv && mv.exists && mv.name)
-        .map((mv) => mv.name)
-        .sort();
-      learnsetCache.set(id, names);
-      return names;
-    }
+  // Battle-only / alt formes (Necrozma-Ultra, Zacian-Crowned, megas…) carry almost
+  // no learnset of their own — UNION the forme's moves with the base species'.
+  const out = new Set();
+  for (const id of [sp.id, toID(sp.baseSpecies)]) {
+    if (!id) continue;
+    for (const n of await learnsetFor(id)) out.add(n);
   }
-  return null;
+  return out.size ? [...out].sort() : null;
 }
 
 const movepoolsOut = {};
