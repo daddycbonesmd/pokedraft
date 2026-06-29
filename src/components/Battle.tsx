@@ -12,6 +12,7 @@ import {
 import {
   replay, type BattleSnapshot, type Viewer, type Request, type Slot,
 } from "@/lib/battle";
+import { buildTimeline, type Step, type BannerTone } from "@/lib/playback";
 
 const NEED_TARGET = new Set(["normal", "any", "adjacentFoe"]);
 type MoveInfo = { name: string; type: string; cat: "Physical" | "Special" | "Status"; bp: number; acc: number; pp: number; pr: number; target: string; desc: string };
@@ -31,6 +32,12 @@ function speedRange(base: number, level: number): [number, number] {
 const EFF_LABEL = (x: number) => (x === 0 ? "No effect" : x >= 4 ? "4× super effective" : x > 1 ? "2× super effective" : x <= 0.25 ? "¼× resisted" : x < 1 ? "½× resisted" : "1× neutral");
 const EFF_COLOR = (x: number) => (x === 0 ? "#6b6b6b" : x > 1 ? "#d9594c" : x < 1 ? "#4f8fd6" : "#7a7a7a");
 const EFF_TEXT = (x: number) => (x === 0 ? "0×" : x === 4 ? "4×" : x === 2 ? "2×" : x === 0.5 ? "½×" : x === 0.25 ? "¼×" : "1×");
+// Colour the playback event banner by what kind of event it is.
+const BANNER_COLOR: Record<BannerTone, string> = {
+  move: "#3a3a44", super: "#d9594c", resist: "#4f8fd6", immune: "#6b6b6b", crit: "#d9594c", miss: "#8a8a8a",
+  fail: "#8a8a8a", status: "#9b5fb0", boostUp: "#2f9e54", boostDown: "#d24a3d", faint: "#2a2a2a",
+  weather: "#5a86c9", field: "#2f8f83", ability: "#c98a2f", heal: "#3aa657", info: "#3a3a44",
+};
 type SlotChoice =
   | { kind: "move"; index: number; moveTarget: string; needTarget: boolean }
   | { kind: "switch"; index: number };
@@ -47,10 +54,14 @@ export default function Battle({ id }: { id: string }) {
   const reported = useRef(false);
   const runRef = useRef<() => void>(() => {});
   const prevChoiceLen = useRef(0);
-  const [attackers, setAttackers] = useState<Set<string>>(new Set());
   const [movedex, setMovedex] = useState<Record<string, MoveInfo>>({});
   const [dex, setDex] = useState<Map<string, PokeMon>>(new Map());
-  const prevLogLen = useRef(0);
+  // Animated playback: `cursor` is the timeline step currently on screen (−1 = caught
+  // up, showing the live final state). `playedRef` is the furthest step we've shown.
+  const [cursor, setCursor] = useState(-1);
+  const playedRef = useRef(-1);
+  const firstTimeline = useRef(true);
+  const loadedRef = useRef(false);
 
   useEffect(() => { fetch("/movedex.json").then((r) => r.json()).then(setMovedex).catch(() => {}); }, []);
   useEffect(() => {
@@ -92,6 +103,7 @@ export default function Battle({ id }: { id: string }) {
       }, viewer);
       if (cancelled) return;
       setBattle(b); setChoices(ch); setSnap(s);
+      loadedRef.current = true;
       // Only clear an in-progress selection when the turn actually advanced (a new
       // choice was recorded). Otherwise the safety heartbeat below would wipe the
       // move the player is mid-way through picking every few seconds.
@@ -154,19 +166,40 @@ export default function Battle({ id }: { id: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [battle?.id, battle?.status]);
 
-  // Flag whoever just used a move so their sprite lunges (attack animation).
-  // Set to the fresh movers each snapshot (empty when no new moves) so `attacking`
-  // toggles back off between turns — the lunge re-fires on every turn's false→true.
+  // The animated playback timeline. The protocol log is append-only, so its length
+  // is a stable identity: a heartbeat re-replay with no new events reuses the same
+  // memoized timeline and the driver below doesn't restart an in-flight animation.
+  const rawLen = snap?.raw?.length ?? 0;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const timeline = useMemo(() => buildTimeline(snap?.raw ?? [], viewer), [rawLen, viewer]);
+
+  // Playback driver: when new steps appear, reveal them one at a time on each step's
+  // own delay (≈1.3s per move, quicker for sub-events) so the turn plays out in speed
+  // order. When it reaches the end it drops back to the live final state (cursor −1).
   useEffect(() => {
-    if (!snap) return;
-    const fresh = snap.log.slice(prevLogLen.current);
-    const first = prevLogLen.current === 0;
-    prevLogLen.current = snap.log.length;
-    if (first) return; // don't replay the whole history on load
-    const movers = new Set<string>();
-    for (const l of fresh) { const m = l.match(/^(.+?) used /); if (m) movers.add(m[1].trim()); }
-    setAttackers((prev) => (prev.size === 0 && movers.size === 0 ? prev : movers));
-  }, [snap]);
+    const len = timeline.length;
+    if (firstTimeline.current) {
+      if (!loadedRef.current) return;        // wait for the first real load
+      firstTimeline.current = false;
+      playedRef.current = len - 1;           // treat everything already present as history
+      setCursor(-1);
+      return;
+    }
+    if (len - 1 <= playedRef.current) return; // nothing new to animate
+    let i = playedRef.current + 1;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      setCursor(i);
+      playedRef.current = i;
+      const d = timeline[i]?.delayMs ?? 800;
+      if (i >= len - 1) { timer = setTimeout(() => setCursor((c) => (c === len - 1 ? -1 : c)), d); return; }
+      i++;
+      timer = setTimeout(tick, d);
+    };
+    tick();
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeline]);
 
   if (fatal) return <Centered>{fatal} <Link href="/" className="text-coral underline">Home</Link></Centered>;
   if (!snap || !battle) return <Centered><span className="hand text-3xl text-coral">entering the battle…</span></Centered>;
@@ -178,7 +211,17 @@ export default function Battle({ id }: { id: string }) {
   const winner = snap.winner ?? battle.winner;
   const aliveFoes = snap.far.active.filter((s) => s && !s.fainted).length;
   const isDoubles = battle.format !== "singles";
-  const iMustChoose = isPlayer && !ended && snap.owes && !req?.teamPreview;
+
+  // While the turn is animating, the field shows the current playback step instead
+  // of the live final state, and the player can't act yet (it'd be choosing against a
+  // board that's still resolving). cursor −1 ⇒ caught up to the live snapshot.
+  const playing = cursor >= 0 && cursor < timeline.length;
+  const step: Step | null = playing ? timeline[cursor] : null;
+  const viewNear = step ? { name: step.nearName || snap.near.name, active: step.near } : snap.near;
+  const viewFar = step ? { name: step.farName || snap.far.name, active: step.far } : snap.far;
+  const attackerSpecies = step?.attacker ?? null;
+
+  const iMustChoose = isPlayer && !ended && snap.owes && !req?.teamPreview && !playing;
   const inTeamPreview = isPlayer && !ended && snap.owes && Boolean(req?.teamPreview);
 
   const benched = (req?.side?.pokemon ?? [])
@@ -285,35 +328,48 @@ export default function Battle({ id }: { id: string }) {
           overflow-visible so hover tooltips can spill past the arena edge. */}
       <div className="relative rounded-xl shadow-inner"
         style={{ height: 320, background: "linear-gradient(#add8ee 0%, #c4e3f2 50%, #cfe8a6 50%, #aed98c 100%)" }}>
-        {/* field conditions */}
-        {(snap.field.weather || snap.field.terrain || snap.field.trickRoom) && (
+        {/* field conditions (from the current playback step while animating) */}
+        {((step ? step.field.weather : snap.field.weather) || (step ? step.field.terrain : snap.field.terrain) || (step ? step.field.trickRoom : snap.field.trickRoom)) && (
           <div className="absolute top-2 left-1/2 -translate-x-1/2 flex gap-1 z-20">
-            {snap.field.weather && <FieldChip>{snap.field.weather}</FieldChip>}
-            {snap.field.terrain && <FieldChip>{snap.field.terrain}</FieldChip>}
-            {snap.field.trickRoom && <FieldChip>Trick Room</FieldChip>}
+            {(step ? step.field.weather : snap.field.weather) && <FieldChip>{step ? step.field.weather : snap.field.weather}</FieldChip>}
+            {(step ? step.field.terrain : snap.field.terrain) && <FieldChip>{step ? step.field.terrain : snap.field.terrain}</FieldChip>}
+            {(step ? step.field.trickRoom : snap.field.trickRoom) && <FieldChip>Trick Room</FieldChip>}
+          </div>
+        )}
+        {/* event banner — the move/effect/faint text that plays out in speed order */}
+        {step?.banner && (
+          <div key={cursor} className="event-banner absolute top-9 left-1/2 -translate-x-1/2 z-30 px-3 py-1.5 rounded-full text-white text-sm font-bold shadow-lg whitespace-nowrap max-w-[90%] overflow-hidden text-ellipsis"
+            style={{ background: BANNER_COLOR[step.tone] }}>
+            {step.banner}
           </div>
         )}
         {/* opponent — HP top-left, sprites upper center-right */}
-        <div className="absolute top-3 left-3 z-10"><HpPlate side={snap.far} align="left" /></div>
+        <div className="absolute top-3 left-3 z-10"><HpPlate side={viewFar} align="left" /></div>
         <div className="absolute top-6 right-6 left-[40%] flex justify-center gap-5 items-end">
-          {(snap.far.active.filter(Boolean) as NonNullable<Slot>[]).map((m, i) => (
-            <BattleMon key={`far-${i}`} mon={m} facing="front" attacking={attackers.has(m.species)}
+          {(viewFar.active.filter(Boolean) as NonNullable<Slot>[]).map((m, i) => (
+            <BattleMon key={`far-${i}`} mon={m} facing="front" attacking={attackerSpecies === m.species}
               tip={<MonTooltip mon={m} info={dex.get(toID(m.species))} revealed={snap.farRevealed[m.species]} side="foe" />} />
           ))}
         </div>
         {/* you — HP bottom-right, sprites lower center-left */}
-        <div className="absolute bottom-3 right-3 z-10"><HpPlate side={snap.near} align="right" /></div>
+        <div className="absolute bottom-3 right-3 z-10"><HpPlate side={viewNear} align="right" /></div>
         <div className="absolute bottom-5 left-6 right-[40%] flex justify-center gap-5 items-end">
-          {(snap.near.active.filter(Boolean) as NonNullable<Slot>[]).map((m, i) => (
-            <BattleMon key={`near-${i}`} mon={m} facing="back" attacking={attackers.has(m.species)}
+          {(viewNear.active.filter(Boolean) as NonNullable<Slot>[]).map((m, i) => (
+            <BattleMon key={`near-${i}`} mon={m} facing="back" attacking={attackerSpecies === m.species}
               tip={<MonTooltip mon={m} info={dex.get(toID(m.species))} revealed={snap.nearRevealed[m.species]} side="ally" />} />
           ))}
         </div>
+        <style jsx>{`
+          .event-banner { animation: bannerPop 0.18s ease-out; }
+          @keyframes bannerPop { from { opacity: 0; transform: translate(-50%, -6px) scale(0.92); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
+        `}</style>
       </div>
 
       {/* Status / choices */}
       <div className="paper p-4 mt-4">
-        {ended ? (
+        {playing ? (
+          <p className="text-center text-ink-soft animate-pulse">Resolving turn {snap.turn}…</p>
+        ) : ended ? (
           <p className="hand text-3xl text-coral text-center">
             {!winner || winner === "tie" ? "It's a tie!" : `${winner} wins!`}
           </p>

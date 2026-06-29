@@ -51,6 +51,7 @@ export type BattleSnapshot = {
   far: SideView;           // opponent
   field: FieldState;       // weather / terrain / Trick Room
   log: string[];           // human-readable events
+  raw: string[];           // raw Showdown protocol log (drives the animated playback timeline)
   nearRevealed: Record<string, string[]>; // species → moves the viewer's team has been seen using
   farRevealed: Record<string, string[]>;  // species → moves the opponent has been seen using
 };
@@ -183,6 +184,7 @@ export function replay(
       trickRoom: Boolean(f.pseudoWeather?.trickroom),
     },
     log: readableLog(battle.log),
+    raw: [...battle.log],
     nearRevealed: toArr(revealed[viewer === "p2" ? "p2" : "p1"]),
     farRevealed: toArr(revealed[viewer === "p2" ? "p1" : "p2"]),
   };
