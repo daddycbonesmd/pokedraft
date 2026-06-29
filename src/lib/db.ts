@@ -22,8 +22,11 @@ export type League = {
 
 export type BattleFormat = "singles" | "doubles";
 // The Showdown engine format id used for battles in this league.
+// Doubles is "bring 4 of your team, send 2 out" (VGC-style): Picked Team Size = 4
+// restricts the active field to the 4 chosen mons, so faint/switch prompts only
+// ever offer those 4 — never the full roster of 6.
 export const engineFormat = (f: BattleFormat) =>
-  f === "singles" ? "gen9customgame" : "gen9doublescustomgame";
+  f === "singles" ? "gen9customgame" : "gen9doublescustomgame@@@Picked Team Size = 4";
 
 export type Coach = {
   id: string;

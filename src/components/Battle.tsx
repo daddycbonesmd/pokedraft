@@ -31,6 +31,7 @@ export default function Battle({ id }: { id: string }) {
   const [code, setCode] = useState("");
   const reported = useRef(false);
   const runRef = useRef<() => void>(() => {});
+  const prevChoiceLen = useRef(0);
   const [attackers, setAttackers] = useState<Set<string>>(new Set());
   const [movedex, setMovedex] = useState<Record<string, MoveInfo>>({});
   const prevLogLen = useRef(0);
@@ -67,7 +68,11 @@ export default function Battle({ id }: { id: string }) {
         seed: b.seed, choices: ch.map((c) => ({ side: c.side, choice: c.choice })),
       }, viewer);
       if (cancelled) return;
-      setBattle(b); setChoices(ch); setSnap(s); setPending({}); setGimmick({});
+      setBattle(b); setChoices(ch); setSnap(s);
+      // Only clear an in-progress selection when the turn actually advanced (a new
+      // choice was recorded). Otherwise the safety heartbeat below would wipe the
+      // move the player is mid-way through picking every few seconds.
+      if (ch.length !== prevChoiceLen.current) { setPending({}); setGimmick({}); prevChoiceLen.current = ch.length; }
 
       // Any client persists the result once the engine declares a winner.
       if (s.ended && b.status === "active") await finishBattle(id, s.winner);
@@ -114,6 +119,18 @@ export default function Battle({ id }: { id: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [battle?.id, battle?.p2_coach_id, viewer]);
 
+  // Safety heartbeat: Supabase realtime can silently drop its socket after a while,
+  // which would otherwise freeze the player's view mid-battle and look like the move
+  // selection "timing out". Re-replaying every few seconds makes the screen always
+  // self-heal to the latest server state. (pending is preserved unless the turn
+  // advanced — see the choice-length guard in `run`.)
+  useEffect(() => {
+    if (!battle) return;
+    const iv = setInterval(() => { if (battle.status !== "done") runRef.current(); }, 3000);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [battle?.id, battle?.status]);
+
   // Flag whoever just used a move so their sprite lunges (attack animation).
   // Set to the fresh movers each snapshot (empty when no new moves) so `attacking`
   // toggles back off between turns — the lunge re-fires on every turn's false→true.
@@ -141,13 +158,31 @@ export default function Battle({ id }: { id: string }) {
   const iMustChoose = isPlayer && !ended && snap.owes && !req?.teamPreview;
   const inTeamPreview = isPlayer && !ended && snap.owes && Boolean(req?.teamPreview);
 
-  // Which active slots need a decision this request.
+  const benched = (req?.side?.pokemon ?? [])
+    .map((p, i) => ({ ...p, party: i + 1 }))
+    .filter((p) => !p.active && !p.condition.includes("fnt"));
+  const hasBench = benched.length > 0;
+
+  // What does each active slot need from the player this request?
+  //  • "switch" — a fainted slot with replacements waiting (forceSwitch + bench)
+  //  • "move"   — a living active Pokémon choosing an action
+  //  • "pass"   — a fainted slot with nothing to send in. This is the doubles
+  //               "last Pokémon fighting alone" case: the engine keeps the dead
+  //               slot in the request (with its old moves!) but no forceSwitch, so
+  //               we must auto-pass it instead of demanding a choice for a corpse.
+  //               Demanding one is what froze the battle when down to one mon.
+  const slotCount = Math.max(req?.active?.length ?? 0, req?.forceSwitch?.length ?? 0) || 1;
+  const slotAction = (i: number): "move" | "switch" | "pass" => {
+    if (req?.forceSwitch?.[i]) return hasBench ? "switch" : "pass";
+    const fieldMon = snap.near.active[i];
+    if (req?.active?.[i] && fieldMon && !fieldMon.fainted) return "move";
+    return "pass";
+  };
+
+  // Which active slots actually need a player decision (the rest auto-pass).
   const activeSlots: number[] = [];
   if (req && iMustChoose) {
-    const n = req.active?.length ?? req.forceSwitch?.length ?? 1;
-    for (let i = 0; i < n; i++) {
-      if (req.forceSwitch?.[i] || req.active?.[i]) activeSlots.push(i);
-    }
+    for (let i = 0; i < slotCount; i++) if (slotAction(i) !== "pass") activeSlots.push(i);
   }
   const slotComplete = (i: number) => {
     const c = pending[i];
@@ -176,13 +211,18 @@ export default function Battle({ id }: { id: string }) {
     setPending((p) => ({ ...p, [slot]: { kind: "switch", index: partyIndex } }));
   }
   async function submit() {
-    const cmd = activeSlots.map((i) => {
+    // Build a choice for every slot in order — fainted/empty slots auto-pass so the
+    // comma-separated command always lines up with what the engine expects.
+    const parts: string[] = [];
+    for (let i = 0; i < slotCount; i++) {
+      const action = slotAction(i);
       const c = pending[i];
-      if (c.kind === "switch") return `switch ${c.index}`;
+      if (action === "pass" || !c) { parts.push("pass"); continue; }
+      if (c.kind === "switch") { parts.push(`switch ${c.index}`); continue; }
       const g = gimmick[i] ? ` ${gimmick[i]}` : "";
-      return `move ${c.index}${c.moveTarget ? ` ${c.moveTarget}` : ""}${g}`;
-    }).join(", ");
-    await submitChoice(id, viewer as string, myChoiceCount, cmd);
+      parts.push(`move ${c.index}${c.moveTarget ? ` ${c.moveTarget}` : ""}${g}`);
+    }
+    await submitChoice(id, viewer as string, myChoiceCount, parts.join(", "));
     scheduleSync();
   }
   async function submitLeads(order: number[]) {
@@ -199,10 +239,6 @@ export default function Battle({ id }: { id: string }) {
     await finishBattle(id, viewer === "p1" ? battle!.p2_name : battle!.p1_name);
     scheduleSync();
   }
-
-  const benched = (req?.side?.pokemon ?? [])
-    .map((p, i) => ({ ...p, party: i + 1 }))
-    .filter((p) => !p.active && !p.condition.includes("fnt"));
 
   return (
     <main className="max-w-3xl mx-auto px-4 py-6">

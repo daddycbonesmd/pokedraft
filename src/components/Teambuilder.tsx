@@ -217,6 +217,28 @@ function SetEditor({
         {!setReady(set) && <span className="text-xs text-ink-soft italic">needs a move</span>}
       </div>
 
+      {/* Base stats — so you can plan a set without leaving the page */}
+      <div className="mt-3">
+        <div className="flex items-center justify-between mb-1">
+          <Label>Base stats</Label>
+          <span className="text-[11px] text-ink-soft font-semibold">BST {mon.bst}</span>
+        </div>
+        <div className="grid grid-cols-6 gap-1.5">
+          {STATS.map((s) => {
+            const v = mon.stats[s];
+            return (
+              <div key={s} className="text-center">
+                <div className="text-[10px] font-bold text-ink-soft">{STAT_LABEL[s]}</div>
+                <div className="text-sm font-mono font-bold tabular-nums" style={{ color: statColor(v) }}>{v}</div>
+                <div className="h-1 mt-0.5 rounded-full bg-black/10 overflow-hidden">
+                  <div className="h-full rounded-full" style={{ width: `${Math.min(100, (v / 200) * 100)}%`, background: statColor(v) }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Archetype auto-fill buttons */}
       {roles.length > 0 && (
         <div className="mt-3">
@@ -317,6 +339,15 @@ function SetEditor({
 
 function Label({ children }: { children: React.ReactNode }) {
   return <span className="text-xs font-semibold text-ink-soft block mb-1">{children}</span>;
+}
+
+// Colour a base stat the way the Showdown teambuilder does — red (weak) → green (strong).
+function statColor(v: number): string {
+  if (v >= 130) return "#3aa657";
+  if (v >= 100) return "#7cb342";
+  if (v >= 80) return "#c9a227";
+  if (v >= 60) return "#e07b39";
+  return "#d9594c";
 }
 
 function Centered({ children }: { children: React.ReactNode }) {
