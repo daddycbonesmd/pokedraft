@@ -1,17 +1,22 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   getLeagueByCode, getRoomState, getIdentity, saveTournament, subscribeLeague,
+  createBattle, getBattleByMatch,
   type League, type Coach,
 } from "@/lib/db";
 import {
   buildTournament, participants, standings, slotState, resolveByes, FORMAT_LABEL,
   type Tournament, type TFormat, type TMatch,
 } from "@/lib/tournament";
+import { teamToShowdown, setReady } from "@/lib/teambuilder";
 import { supabaseReady } from "@/lib/supabase";
 import { EnvNotice } from "./HostLeague";
+
+const rand = () => Math.floor(Math.random() * 65536);
 
 export default function TournamentView({ code }: { code: string }) {
   const [league, setLeague] = useState<League | null>(null);
@@ -21,6 +26,7 @@ export default function TournamentView({ code }: { code: string }) {
   const [seedOrder, setSeedOrder] = useState<string[]>([]);
   const leagueIdRef = useRef<string | null>(null);
   const identity = useMemo(() => getIdentity(code), [code]);
+  const router = useRouter();
 
   const refresh = useCallback(async () => {
     if (!leagueIdRef.current) return;
@@ -79,6 +85,30 @@ export default function TournamentView({ code }: { code: string }) {
     mutate((tt) => { const x = tt.matches.find((q) => q.id === m.id)!; x.winner = winner; x.status = "confirmed"; });
   const resetMatch = (m: TMatch) =>
     mutate((tt) => { const x = tt.matches.find((q) => q.id === m.id)!; x.winner = null; x.status = "pending"; x.reportWinner = null; x.reportBy = null; });
+
+  // Launch (or resume) a real battle for this match; its result advances the bracket.
+  async function startMatchBattle(m: TMatch, aId: string, bId: string) {
+    setError("");
+    const ca = coaches.find((c) => c.id === aId);
+    const cb = coaches.find((c) => c.id === bId);
+    if (!ca || !cb) return;
+    const aReady = ca.team?.some(setReady), bReady = cb.team?.some(setReady);
+    if (!aReady || !bReady) { setError(`${!aReady ? ca.name : cb.name} hasn't built a battle-ready team yet.`); return; }
+    try {
+      const existing = await getBattleByMatch(league!.id, m.id);
+      if (existing) { router.push(`/battle/${existing.id}`); return; }
+      const { packTeam } = await import("@/lib/battle");
+      const battle = await createBattle({
+        leagueId: league!.id, format: league!.battle_format ?? "doubles",
+        p1: { coachId: ca.id, name: ca.name, team: packTeam(teamToShowdown(ca.team!)) },
+        p2: { coachId: cb.id, name: cb.name, team: packTeam(teamToShowdown(cb.team!)) },
+        seed: [rand(), rand(), rand(), rand()], matchId: m.id,
+      });
+      router.push(`/battle/${battle.id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start the battle.");
+    }
+  }
 
   // ── No tournament yet ──────────────────────────────────────────
   if (!t) {
@@ -139,6 +169,9 @@ export default function TournamentView({ code }: { code: string }) {
         </div>
         {ready && (
           <div className="mt-2 border-t border-dashed border-paper-edge pt-1.5 text-xs">
+            {m.status !== "confirmed" && (iPlay || isAdmin) && (
+              <button className="btn btn-coral text-xs py-1 w-full mb-1.5" onClick={() => startMatchBattle(m, a!, b!)}>⚔ Battle</button>
+            )}
             {m.status === "confirmed" ? (
               <div className="flex items-center justify-between">
                 <span className="text-ink-soft">Winner: <b>{name(m.winner)}</b></span>

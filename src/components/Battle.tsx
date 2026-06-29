@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Sprites } from "@pkmn/img";
 import {
   engineFormat, getBattle, getBattleChoices, getLeagueById, getIdentity,
-  subscribeBattle, submitChoice, finishBattle,
+  subscribeBattle, submitChoice, finishBattle, reportMatchResult,
   type Battle as BattleRow, type BattleChoice, type BattleFormat,
 } from "@/lib/db";
 import {
@@ -26,6 +26,7 @@ export default function Battle({ id }: { id: string }) {
   const [gimmick, setGimmick] = useState<Record<number, "mega" | "terastallize">>({});
   const [fatal, setFatal] = useState("");
   const [code, setCode] = useState("");
+  const reported = useRef(false);
 
   // Initial load: identify the viewer + sprite map.
   useEffect(() => {
@@ -58,6 +59,14 @@ export default function Battle({ id }: { id: string }) {
 
       // Any client persists the result once the engine declares a winner.
       if (s.ended && b.status === "active") await finishBattle(id, s.winner);
+
+      // Advance the tournament bracket once this match's battle is settled.
+      const w = s.winner ?? b.winner;
+      if (!reported.current && b.match_id && (s.ended || b.status === "done") && w && w !== "tie") {
+        reported.current = true;
+        const winnerCoachId = w === b.p1_name ? b.p1_coach_id : b.p2_coach_id;
+        if (winnerCoachId) await reportMatchResult(b.league_id, b.match_id, winnerCoachId);
+      }
     };
     run();
     const unsub = subscribeBattle(id, run);

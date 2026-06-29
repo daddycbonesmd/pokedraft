@@ -75,8 +75,10 @@ create table if not exists battles (
   seed jsonb not null default '[]'::jsonb,   -- PRNG seed so all clients agree
   status text not null default 'active',     -- active | done
   winner text,                               -- coach name, 'tie', or null
+  match_id text,                             -- tournament match this battle settles (null = exhibition)
   created_at timestamptz not null default now()
 );
+alter table battles add column if not exists match_id text;
 
 create table if not exists battle_choices (
   id uuid primary key default gen_random_uuid(),

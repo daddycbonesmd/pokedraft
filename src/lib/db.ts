@@ -1,5 +1,5 @@
 import { supabase, COACH_COLORS } from "./supabase";
-import { type Tournament } from "./tournament";
+import { resolveByes, type Tournament } from "./tournament";
 import { type Team } from "./teambuilder";
 
 export type League = {
@@ -320,6 +320,7 @@ export type Battle = {
   seed: number[];
   status: string; // active | done
   winner: string | null;
+  match_id: string | null; // tournament match this settles (null = exhibition)
   created_at: string;
 };
 export type BattleChoice = { id: string; battle_id: string; side: string; seq: number; choice: string; created_at: string };
@@ -328,16 +329,28 @@ export async function createBattle(b: {
   leagueId: string; format: string;
   p1: { coachId: string; name: string; team: string };
   p2: { coachId: string; name: string; team: string };
-  seed: number[];
+  seed: number[]; matchId?: string | null;
 }): Promise<Battle> {
-  const { data, error } = await supabase.from("battles").insert({
+  const row = {
     league_id: b.leagueId, format: b.format,
     p1_coach_id: b.p1.coachId, p2_coach_id: b.p2.coachId,
     p1_name: b.p1.name, p2_name: b.p2.name,
     p1_team: b.p1.team, p2_team: b.p2.team, seed: b.seed,
-  }).select().single();
+  };
+  let { data, error } = await supabase.from("battles").insert({ ...row, match_id: b.matchId ?? null }).select().single();
+  if (error && /match_id|column/i.test(error.message ?? "")) {
+    ({ data, error } = await supabase.from("battles").insert(row).select().single());
+  }
   if (error) throw error;
   return data;
+}
+
+// An existing active battle for a tournament match, if any (avoids duplicates).
+export async function getBattleByMatch(leagueId: string, matchId: string): Promise<Battle | null> {
+  const { data } = await supabase.from("battles").select()
+    .eq("league_id", leagueId).eq("match_id", matchId).eq("status", "active")
+    .order("created_at", { ascending: false }).limit(1).maybeSingle();
+  return data ?? null;
 }
 
 export async function getBattle(id: string): Promise<Battle | null> {
@@ -362,6 +375,19 @@ export async function submitChoice(battleId: string, side: string, seq: number, 
 
 export async function finishBattle(id: string, winner: string | null): Promise<void> {
   await supabase.from("battles").update({ status: "done", winner }).eq("id", id).eq("status", "active");
+}
+
+// Record a finished battle's winner onto its tournament match and advance the bracket.
+export async function reportMatchResult(leagueId: string, matchId: string, winnerCoachId: string): Promise<void> {
+  const league = await getLeagueById(leagueId);
+  const t = league?.tournament;
+  if (!t) return;
+  const m = t.matches.find((x) => x.id === matchId);
+  if (!m || m.winner) return; // already settled — don't overwrite
+  m.winner = winnerCoachId;
+  m.status = "confirmed";
+  resolveByes(t);
+  await saveTournament(leagueId, t);
 }
 
 export function subscribeBattle(battleId: string, onChange: () => void) {
