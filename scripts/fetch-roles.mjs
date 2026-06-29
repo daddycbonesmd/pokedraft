@@ -49,6 +49,55 @@ function spreadFor(roleName, moves) {
   return { evs: { hp: 4, [atk]: 252, spe: 252 }, nature: atk === "atk" ? "Jolly" : "Timid", ivs: {} };
 }
 
+const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+const UTILITY = [
+  "Protect", "Detect", "Fake Out", "Follow Me", "Rage Powder", "Spore", "Sleep Powder", "Will-O-Wisp", "Thunder Wave",
+  "Swords Dance", "Nasty Plot", "Calm Mind", "Dragon Dance", "Quiver Dance", "Bulk Up", "Shell Smash",
+  "Recover", "Roost", "Synthesis", "Moonlight", "Slack Off", "Soft-Boiled", "Substitute", "Taunt",
+];
+
+// Build one sensible "Balanced" set for Pokémon that have no randbats roles, so
+// every Pokémon gets an auto-build option. Picks STAB + coverage from the legal
+// movepool by base power, a utility move, and an offensive/bulky spread by stats.
+function synthSet(mon, moveNames) {
+  const s = mon.stats || {};
+  const physical = (s.atk ?? 0) >= (s.spa ?? 0);
+  const wantCat = physical ? "Physical" : "Special";
+  const md = moveNames.map((n) => Dex.moves.get(n)).filter((m) => m && m.exists);
+  const isStab = (m) => mon.types.includes(m.type.toLowerCase());
+  const byBp = (a, b) => b.basePower - a.basePower;
+  const attacking = md.filter((m) => m.category === wantCat && m.basePower > 0);
+  const stab = attacking.filter(isStab).sort(byBp);
+  const coverage = attacking.filter((m) => !isStab(m)).sort(byBp);
+
+  const chosen = [];
+  const seenTypes = new Set();
+  const add = (name, type) => {
+    if (name && !chosen.includes(name) && chosen.length < 4) { chosen.push(name); if (type) seenTypes.add(type); }
+  };
+  if (stab[0]) add(stab[0].name, stab[0].type);
+  for (const m of coverage) { if (chosen.length >= 3) break; if (!seenTypes.has(m.type)) add(m.name, m.type); }
+  for (const m of [...stab.slice(1), ...attacking]) { if (chosen.length >= 3) break; add(m.name, m.type); }
+  const util = UTILITY.find((u) => moveNames.includes(u));
+  if (util) add(util);
+  for (const n of moveNames) { if (chosen.length >= 4) break; add(n); }
+  const moves = chosen.slice(0, 4);
+  if (!moves.length) return null;
+
+  const atk = physical ? "atk" : "spa";
+  const fast = (s.spe ?? 0) >= 80;
+  const evs = fast ? { hp: 4, [atk]: 252, spe: 252 } : { hp: 252, [atk]: 252, def: 4 };
+  const nature = fast ? (physical ? "Jolly" : "Timid") : (physical ? "Adamant" : "Modest");
+  return {
+    name: "Balanced",
+    moves,
+    ability: (mon.abilities && mon.abilities[0]) || "",
+    item: fast ? "Life Orb" : "Leftovers",
+    tera: cap(mon.types[0] || "normal"),
+    nature, evs, ivs: {}, level: LEVEL,
+  };
+}
+
 function collectRoles(rb, byKey) {
   for (const [name, entry] of Object.entries(rb)) {
     const key = norm(name);
@@ -91,8 +140,7 @@ for (const m of dex) {
   }
   if (list.length) rolesOut[m.id] = list;
 }
-await writeFile(new URL("../public/roles.json", import.meta.url), JSON.stringify(rolesOut));
-console.log(`Wrote roles.json (${Object.keys(rolesOut).length} mons)`);
+console.log(`Randbats roles for ${Object.keys(rolesOut).length} mons; synthesizing the rest…`);
 
 // ── movepools.json (full legal movepool per mon) ──
 console.log("Building legal movepools from @pkmn/dex learnsets…");
@@ -126,8 +174,32 @@ for (const m of dex) {
   if (moves && moves.length) movepoolsOut[m.id] = moves;
   if (++done % 250 === 0) console.log(`  …${done}/${dex.length}`);
 }
+// Fill any form still without a movepool from its base-name segment (e.g.
+// "squawkabilly-green-plumage" → "squawkabilly", "frillish-male" → "frillish").
+for (const m of dex) {
+  if (movepoolsOut[m.id]) continue;
+  const moves = await legalMoves(m.name.split("-")[0]);
+  if (moves && moves.length) movepoolsOut[m.id] = moves;
+}
 await writeFile(new URL("../public/movepools.json", import.meta.url), JSON.stringify(movepoolsOut));
 console.log(`Wrote movepools.json (${Object.keys(movepoolsOut).length} mons)`);
+
+// ── Synthesize a "Balanced" auto-set for every mon WITHOUT randbats roles ──
+// Any movepool found for a given base species, so sibling forms can borrow it.
+const mpByBase = {};
+for (const m of dex) if (movepoolsOut[m.id]) mpByBase[m.baseId] ??= movepoolsOut[m.id];
+
+let synth = 0;
+for (const m of dex) {
+  if (rolesOut[m.id]) continue;
+  // cosmetic/totem/cap/gender forms have no learnset of their own — borrow the base species'
+  const mp = movepoolsOut[m.id] || movepoolsOut[m.baseId] || mpByBase[m.baseId] || mpByBase[m.id];
+  if (!mp || !mp.length) continue;
+  const set = synthSet(m, mp);
+  if (set) { rolesOut[m.id] = [set]; synth++; }
+}
+await writeFile(new URL("../public/roles.json", import.meta.url), JSON.stringify(rolesOut));
+console.log(`Wrote roles.json (${Object.keys(rolesOut).length} mons; ${synth} synthesized + randbats)`);
 
 // ── species.json (monId → canonical Showdown species name, so teams import cleanly) ──
 function showdownSpecies(m) {
