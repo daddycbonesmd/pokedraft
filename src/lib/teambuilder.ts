@@ -69,6 +69,20 @@ export function emptySet(monId: number, species: string, abilities: string[]): B
   };
 }
 
+// Auto-fill obeys Item Clause: each Pokémon gets a distinct item. When a set's
+// preferred item is already taken, fall back to the next free common item.
+export const ITEM_FALLBACKS = [
+  "Leftovers", "Sitrus Berry", "Rocky Helmet", "Assault Vest", "Life Orb", "Focus Sash",
+  "Choice Scarf", "Choice Specs", "Choice Band", "Expert Belt", "Safety Goggles", "Covert Cloak",
+  "Wide Lens", "Mental Herb", "Clear Amulet", "Eviolite", "Weakness Policy", "Throat Spray",
+  "Mystic Water", "Charcoal", "Magnet", "Miracle Seed", "Light Clay", "Mirror Herb",
+];
+export function uniqueItem(preferred: string, taken: Set<string>): string {
+  if (!preferred || !taken.has(preferred)) return preferred;
+  for (const it of ITEM_FALLBACKS) if (!taken.has(it)) return it;
+  return preferred; // pool exhausted (very large team) — allow the duplicate
+}
+
 export function setFromRole(monId: number, species: string, role: RoleSet): BattleSet {
   return {
     monId, species,

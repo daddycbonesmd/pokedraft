@@ -9,7 +9,7 @@ import { supabaseReady } from "@/lib/supabase";
 import {
   STATS, STAT_LABEL, EV_TOTAL_MAX, EV_STAT_MAX, NATURES, natureLabel, TERA_TYPES,
   loadRoles, loadMovepools, loadSpecies, loadItems,
-  emptySet, setFromRole, setReady, evTotal, teamToShowdown,
+  emptySet, setFromRole, setReady, evTotal, teamToShowdown, uniqueItem,
   type BattleSet, type RoleSet, type Stat, type ItemInfo,
 } from "@/lib/teambuilder";
 
@@ -76,15 +76,29 @@ export default function Teambuilder({ code }: { code: string }) {
   function update(monId: number, patch: Partial<BattleSet>) {
     setSets((s) => ({ ...s, [monId]: { ...s[monId], ...patch } }));
   }
-  // Fill every drafted Pokémon with its best (first) auto-set.
+  // Fill every drafted Pokémon with its best (first) auto-set, no duplicate items.
   function autoFillAll() {
     setSets((s) => {
       const next = { ...s };
+      const used = new Set<string>();
       for (const m of mons ?? []) {
         const r = roles[m.id]?.[0];
-        if (r) next[m.id] = setFromRole(m.id, next[m.id].species, r);
+        if (!r) continue;
+        const set = setFromRole(m.id, next[m.id].species, r);
+        set.item = uniqueItem(set.item, used);
+        if (set.item) used.add(set.item);
+        next[m.id] = set;
       }
       return next;
+    });
+  }
+  // Apply one archetype to a single mon, avoiding an item another mon already holds.
+  function applyRole(monId: number, role: RoleSet) {
+    setSets((s) => {
+      const used = new Set<string>(Object.values(s).filter((x) => x.monId !== monId && x.item).map((x) => x.item));
+      const set = setFromRole(monId, s[monId].species, role);
+      set.item = uniqueItem(set.item, used);
+      return { ...s, [monId]: set };
     });
   }
   function setMove(monId: number, i: number, value: string) {
@@ -123,6 +137,9 @@ export default function Teambuilder({ code }: { code: string }) {
   const readyCount = setsList.filter(setReady).length;
   // No explicit list = all standard items (Mega Stones are opt-in via the format).
   const itemOptions = legalItems ? items.filter((i) => legalItems.has(i.name)) : items.filter((i) => i.cat !== "Mega Stone");
+  const itemCounts: Record<string, number> = {};
+  for (const set of setsList) if (set.item) itemCounts[set.item] = (itemCounts[set.item] ?? 0) + 1;
+  const dupItems = Object.keys(itemCounts).filter((it) => itemCounts[it] > 1);
 
   return (
     <main className="max-w-3xl mx-auto px-4 py-8">
@@ -133,6 +150,7 @@ export default function Teambuilder({ code }: { code: string }) {
             League <span className="font-mono font-bold">{code}</span> ·{" "}
             <span className="capitalize font-semibold text-ink">{battleFormat}</span> · {readyCount}/{mons.length} ready ·{" "}
             {saved === "saving" ? "saving…" : saved === "ok" ? "saved" : ""}
+            {dupItems.length > 0 && <span className="text-coral font-semibold"> · ⚠ duplicate item: {dupItems.join(", ")}</span>}
           </p>
         </div>
         <div className="flex gap-2">
@@ -153,7 +171,7 @@ export default function Teambuilder({ code }: { code: string }) {
           <SetEditor
             key={m.id} mon={m} set={sets[m.id]}
             roles={roles[m.id] ?? []} movepool={movepools[m.id] ?? []} items={itemOptions}
-            onApplyRole={(role) => update(m.id, setFromRole(m.id, sets[m.id].species, role))}
+            onApplyRole={(role) => applyRole(m.id, role)}
             onField={(patch) => update(m.id, patch)}
             onMove={(i, v) => setMove(m.id, i, v)}
             onEv={(stat, v) => setEv(m.id, stat, v)}
