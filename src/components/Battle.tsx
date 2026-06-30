@@ -10,9 +10,10 @@ import {
   type Battle as BattleRow, type BattleChoice, type BattleFormat,
 } from "@/lib/db";
 import {
-  replay, type BattleSnapshot, type Viewer, type Request, type Slot,
+  replay, type BattleSnapshot, type Viewer, type Request, type Slot, type FieldState,
 } from "@/lib/battle";
 import { buildTimeline, type Step, type BannerTone } from "@/lib/playback";
+import { calcDamage, type DamageResult } from "@/lib/damagecalc";
 
 const NEED_TARGET = new Set(["normal", "any", "adjacentFoe"]);
 type MoveInfo = { name: string; type: string; cat: "Physical" | "Special" | "Status"; bp: number; acc: number; pp: number; pr: number; target: string; desc: string };
@@ -72,6 +73,9 @@ function speedRange(base: number, level: number): [number, number] {
 const EFF_LABEL = (x: number) => (x === 0 ? "No effect" : x >= 4 ? "4× super effective" : x > 1 ? "2× super effective" : x <= 0.25 ? "¼× resisted" : x < 1 ? "½× resisted" : "1× neutral");
 const EFF_COLOR = (x: number) => (x === 0 ? "#6b6b6b" : x > 1 ? "#d9594c" : x < 1 ? "#4f8fd6" : "#7a7a7a");
 const EFF_TEXT = (x: number) => (x === 0 ? "0×" : x === 4 ? "4×" : x === 2 ? "2×" : x === 0.5 ? "½×" : x === 0.25 ? "¼×" : "1×");
+// Colour a damage-roll chip by lethality (share of the foe's max HP it deals).
+const DMG_COLOR = (d: DamageResult) => (d.immune ? "#6b6b6b" : d.hiPct >= 100 ? "#c0392b" : d.hiPct >= 50 ? "#d97a2f" : d.hiPct >= 25 ? "#b8932f" : "#5a7a8a");
+const round1 = (n: number) => Math.round(n);
 // Colour the playback event banner by what kind of event it is.
 const BANNER_COLOR: Record<BannerTone, string> = {
   move: "#3a3a44", super: "#d9594c", resist: "#4f8fd6", immune: "#6b6b6b", crit: "#d9594c", miss: "#8a8a8a",
@@ -426,7 +430,8 @@ export default function Battle({ id }: { id: string }) {
               {activeSlots.map((i) => (
                 <SlotChooser
                   key={i} slot={i} req={req!} benched={benched} chosen={pending[i]} gimmick={gimmick[i]}
-                  foes={snap.far.active} foeInfos={foeInfos} movedex={movedex} onMove={(mi, t) => chooseMove(i, mi, t)} onTarget={(fi) => chooseTarget(i, fi)}
+                  foes={snap.far.active} foeInfos={foeInfos} attacker={snap.near.active[i]} field={snap.field} gen={battle.generation ?? 9}
+                  movedex={movedex} onMove={(mi, t) => chooseMove(i, mi, t)} onTarget={(fi) => chooseTarget(i, fi)}
                   onSwitch={(pi) => chooseSwitch(i, pi)}
                   onGimmick={(g) => setGimmick((p) => { const n = { ...p }; if (g) n[i] = g; else delete n[i]; return n; })}
                 />
@@ -617,9 +622,9 @@ const hpFromCondition = (c: string) => {
   return c?.includes("fnt") ? 0 : max ? Math.round((cur / max) * 100) : 100;
 };
 
-function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, movedex, onMove, onTarget, onSwitch, onGimmick }: {
+function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, attacker, field, gen, movedex, onMove, onTarget, onSwitch, onGimmick }: {
   slot: number; req: Request; benched: { details: string; condition: string; party: number }[]; chosen?: SlotChoice;
-  gimmick?: Gimmick; foes: Slot[]; foeInfos: FoeInfo[]; movedex: Record<string, MoveInfo>;
+  gimmick?: Gimmick; foes: Slot[]; foeInfos: FoeInfo[]; attacker: Slot; field: FieldState; gen: number; movedex: Record<string, MoveInfo>;
   onMove: (moveIndex: number, target: string) => void; onTarget: (foeIndex: number) => void;
   onSwitch: (partyIndex: number) => void; onGimmick: (g?: Gimmick) => void;
 }) {
@@ -627,6 +632,25 @@ function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, move
   const forceSwitch = req.forceSwitch?.[slot];
   const pickingTarget = chosen?.kind === "move" && chosen.needTarget && !chosen.moveTarget;
   const liveFoes = foeInfos.filter((f): f is NonNullable<FoeInfo> => Boolean(f && !f.fainted && f.types.length));
+  // Damage calculator: for each damaging move, the predicted roll vs each live foe.
+  // Memoised on the actual battle state so flipping move selections doesn't recompute.
+  const liveFoeSlots = foes.filter((f): f is NonNullable<Slot> => Boolean(f && !f.fainted));
+  const dmgKey = JSON.stringify([
+    attacker && [attacker.species, attacker.level, attacker.status, attacker.tera, attacker.boosts, attacker.set?.item, attacker.set?.ability],
+    liveFoeSlots.map((f) => [f.species, f.level, f.hpPct, f.status, f.tera, f.boosts]),
+    field, gen,
+  ]);
+  const dmg = useMemo(() => {
+    const map: Record<string, (DamageResult | null)[]> = {};
+    if (!attacker?.set) return map;
+    for (const mv of active?.moves ?? []) {
+      const info = movedex[mv.id];
+      if (!info || info.cat === "Status") continue;
+      map[mv.id] = liveFoeSlots.map((f) => calcDamage(gen, attacker, f, mv.move, field));
+    }
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dmgKey]);
   return (
     <div className="border border-dashed border-paper-edge rounded p-2">
       {forceSwitch && <div className="text-[11px] font-bold text-coral mb-1.5">A Pokémon fainted — send in a replacement:</div>}
@@ -705,7 +729,17 @@ function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, move
                   <span className="text-[11px] opacity-90">{CAT_ICON[info?.cat ?? "Status"]}</span>
                 </div>
                 <div className="text-[9px] opacity-90">{info?.type ?? ""} · {mv.pp}/{mv.maxpp} PP</div>
-                {effs.length > 0 && (
+                {dmg[mv.id]?.some(Boolean) ? (
+                  // Damage roll vs each live foe (a%–b% of its max HP), colour-coded by lethality.
+                  <div className="flex flex-wrap gap-0.5 mt-1">
+                    {dmg[mv.id].map((d, k) => d && (
+                      <span key={k} className="text-[8px] font-black rounded px-1 leading-tight text-white whitespace-nowrap"
+                        style={{ background: DMG_COLOR(d) }}>
+                        {d.immune ? "immune" : `${round1(d.loPct)}-${round1(d.hiPct)}%`}{liveFoeSlots.length > 1 ? ` ${liveFoeSlots[k].species.slice(0, 4)}` : ""}
+                      </span>
+                    ))}
+                  </div>
+                ) : effs.length > 0 ? (
                   <div className="flex flex-wrap gap-0.5 mt-1">
                     {effs.map(({ f, x }, k) => (
                       <span key={k} className="text-[8px] font-black rounded px-1 leading-tight text-white whitespace-nowrap"
@@ -714,14 +748,23 @@ function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, move
                       </span>
                     ))}
                   </div>
-                )}
+                ) : null}
                 {info && (
                   <span className="pointer-events-none absolute z-30 left-0 bottom-full mb-1 hidden group-hover:block w-56 rounded-md p-2 shadow-xl text-left"
                     style={{ background: "var(--ink)", color: "var(--paper)" }}>
                     <b>{mv.move}</b> · {info.type} · {info.cat}<br />
                     Power {info.bp || "—"} · Acc {info.acc || "—"} · {mv.pp}/{mv.maxpp} PP{info.pr ? ` · Priority ${info.pr > 0 ? "+" : ""}${info.pr}` : ""}
                     <span className="block mt-1 opacity-90">{info.desc}</span>
-                    {effs.length > 0 && (
+                    {dmg[mv.id]?.some(Boolean) ? (
+                      <span className="block mt-1 pt-1 border-t border-white/20">
+                        {dmg[mv.id].map((d, k) => d && (
+                          <span key={k} className="block" style={{ color: d.immune ? undefined : DMG_COLOR(d) }}>
+                            vs {liveFoeSlots[k].species}: {d.immune ? "No effect" : `${round1(d.loPct)}–${round1(d.hiPct)}% (${d.lo}–${d.hi})${d.ko ? " · " + d.ko : ""}`}
+                          </span>
+                        ))}
+                        <span className="block opacity-50 mt-0.5">calc assumes an uninvested foe</span>
+                      </span>
+                    ) : effs.length > 0 ? (
                       <span className="block mt-1 pt-1 border-t border-white/20">
                         {effs.map(({ f, x }, k) => (
                           <span key={k} className="block" style={{ color: EFF_COLOR(x) === "#7a7a7a" ? undefined : EFF_COLOR(x) }}>
@@ -729,7 +772,7 @@ function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, move
                           </span>
                         ))}
                       </span>
-                    )}
+                    ) : null}
                   </span>
                 )}
               </button>

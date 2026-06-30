@@ -45,6 +45,9 @@ export type Slot = {
   tera: string;
   boosts: Record<string, number>; // only non-zero stat stages (atk/def/spa/spd/spe/accuracy/evasion)
   volatiles: string[];            // active volatile conditions (leechseed, confusion, taunt, …)
+  // Spread details for the damage calculator — only populated for the viewer's own
+  // mons (the opponent's EVs/nature/item stay hidden; the calc assumes a default).
+  set?: { ability: string; item: string; nature: string; evs: Record<string, number>; ivs: Record<string, number> };
 } | null;
 export type SideView = { name: string; active: Slot[] };
 export type FieldState = { weather: string; terrain: string; trickRoom: boolean };
@@ -141,7 +144,7 @@ export function replay(
     try { battle.choose(c.side as PlayerSide, c.choice); } catch { /* skip invalid (stale) choice */ }
   }
 
-  const sideView = (idx: number): SideView => ({
+  const sideView = (idx: number, withSet: boolean): SideView => ({
     name: battle.sides[idx].name,
     active: battle.sides[idx].active.map((mon) => mon ? {
       species: mon.species.name,
@@ -154,6 +157,10 @@ export function replay(
         Object.entries((mon as unknown as { boosts?: Record<string, number> }).boosts ?? {}).filter(([, v]) => v !== 0),
       ),
       volatiles: Object.keys((mon as unknown as { volatiles?: Record<string, unknown> }).volatiles ?? {}),
+      set: withSet ? (() => {
+        const m = mon as unknown as { ability?: string; item?: string; set?: { ability?: string; item?: string; nature?: string; evs?: Record<string, number>; ivs?: Record<string, number> } };
+        return { ability: m.ability || m.set?.ability || "", item: m.item || m.set?.item || "", nature: m.set?.nature || "", evs: m.set?.evs || {}, ivs: m.set?.ivs || {} };
+      })() : undefined,
     } : null),
   });
 
@@ -186,8 +193,8 @@ export function replay(
     viewer,
     request: (vSide?.activeRequest ?? null) as Request | null,
     owes,
-    near: sideView(nearIdx),
-    far: sideView(nearIdx === 0 ? 1 : 0),
+    near: sideView(nearIdx, true),
+    far: sideView(nearIdx === 0 ? 1 : 0, false),
     // The opponent's whole team, the way classic Team Preview reveals it (species +
     // level only — items/moves/spreads stay hidden until used).
     farTeam: battle.sides[nearIdx === 0 ? 1 : 0].pokemon.map((p) => ({ species: p.species.name, level: p.level })),
