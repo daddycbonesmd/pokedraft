@@ -14,6 +14,7 @@ import {
 } from "@/lib/battle";
 import { buildTimeline, type Step, type BannerTone } from "@/lib/playback";
 import { calcDamage, type DamageResult } from "@/lib/damagecalc";
+import { arenaFor } from "@/lib/arenas";
 
 const NEED_TARGET = new Set(["normal", "any", "adjacentFoe"]);
 type MoveInfo = { name: string; type: string; cat: "Physical" | "Special" | "Status"; bp: number; acc: number; pp: number; pr: number; target: string; desc: string };
@@ -256,6 +257,7 @@ export default function Battle({ id }: { id: string }) {
   if (!snap || !battle) return <Centered><span className="hand text-3xl text-coral">entering the battle…</span></Centered>;
 
   const myChoiceCount = choices.filter((c) => c.side === viewer).length;
+  const arena = arenaFor(battle.id);
   const req = snap.request;
   const isPlayer = viewer === "p1" || viewer === "p2";
   const ended = snap.ended || battle.status === "done";
@@ -375,10 +377,15 @@ export default function Battle({ id }: { id: string }) {
         </div>
       </div>
 
-      {/* Field — HP plates in the corners opposite each side's Pokémon.
+      {/* Field — a random battle arena (deterministic per battle) behind both sides.
           overflow-visible so hover tooltips can spill past the arena edge. */}
-      <div className="relative rounded-xl shadow-inner"
-        style={{ height: 320, background: "linear-gradient(#add8ee 0%, #c4e3f2 50%, #cfe8a6 50%, #aed98c 100%)" }}>
+      <div className="relative rounded-xl shadow-inner bg-cover bg-center"
+        style={{ height: 320, backgroundColor: "#9fd0e6", backgroundImage: `url(${arena})` }}>
+        {/* a soft vignette so sprites, banners and HP plates stay readable on any arena */}
+        <div className="absolute inset-0 rounded-xl pointer-events-none" style={{ background: "radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.18))" }} />
+        {/* battle stages — a base under each side so both clearly stand on the arena */}
+        <div className="absolute pointer-events-none rounded-[50%]" style={{ top: "33%", left: "44%", right: "7%", height: 54, background: "radial-gradient(ellipse at center, rgba(0,0,0,0.32), transparent 72%)" }} />
+        <div className="absolute pointer-events-none rounded-[50%]" style={{ bottom: "4%", left: "7%", right: "44%", height: 66, background: "radial-gradient(ellipse at center, rgba(0,0,0,0.34), transparent 72%)" }} />
         {/* field conditions (from the current playback step while animating) */}
         {((step ? step.field.weather : snap.field.weather) || (step ? step.field.terrain : snap.field.terrain) || (step ? step.field.trickRoom : snap.field.trickRoom)) && (
           <div className="absolute top-2 left-1/2 -translate-x-1/2 flex gap-1 z-20">
