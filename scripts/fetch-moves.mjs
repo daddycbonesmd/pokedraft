@@ -27,7 +27,8 @@ const SPREAD_TARGETS = new Set(["all-opponents", "all-other-pokemon"]);
 
 function scoreMove(name, d) {
   if (EXCLUDE.has(name)) return 0;
-  if ((d.lb ?? 99) <= 2) return 100;              // signature / near-signature
+  if ((d.lb ?? 99) <= 1) return 100;              // true signature (1 learner)
+  if ((d.lb ?? 99) <= 4) return 96;               // semi-signature (a handful of learners)
   if (PREMIUM_SUPPORT.has(name)) return 95;
   if ((d.pr ?? 0) > 0 && d.c !== "status") return 88; // damaging priority
   if ((d.pr ?? 0) > 0) return 82;                  // status priority (Quick Guard etc.)
@@ -84,6 +85,11 @@ const FORM_KEY = {
 const movesFor = (n) => speciesMoves[n] ?? speciesMoves[FORM_KEY[n] ?? ""];
 
 const myDex = JSON.parse(await readFile(new URL("../public/pokedex.json", import.meta.url)));
+// Full legal movepools (from a prior fetch-roles run) let us surface a mon's
+// signature/semi-signature moves even when they aren't in its competitive set.
+let movepools = {};
+try { movepools = JSON.parse(await readFile(new URL("../public/movepools.json", import.meta.url))); }
+catch { console.warn("movepools.json not found — run fetch-roles.mjs first for signature moves."); }
 const baseName = new Map(myDex.map((m) => [m.id, m.name]));
 const monMoves = new Map(); // monId → Set of moves
 const allMoves = new Set();
@@ -94,6 +100,8 @@ for (const m of myDex) {
   monMoves.set(m.id, have);
   have.forEach((x) => allMoves.add(x));
 }
+// Every movepool move needs a details fetch too, so we can read its learner count.
+for (const id of Object.keys(movepools)) for (const mv of movepools[id]) allMoves.add(mv);
 
 console.log(`Fetching details for ${allMoves.size} moves…`);
 let done = 0;
@@ -114,7 +122,10 @@ const detail = Object.fromEntries(detailPairs);
 const byMon = {};
 const usedMoves = new Set();
 for (const [id, moves] of monMoves) {
-  const scored = [...moves]
+  // Competitive moves + any signature/semi-signature move from the full movepool.
+  const cand = new Set(moves);
+  for (const mv of movepools[id] || []) if ((detail[mv]?.lb ?? 99) <= 4) cand.add(mv);
+  const scored = [...cand]
     .map((mv) => ({ mv, s: scoreMove(mv, detail[mv] || {}) }))
     .filter((x) => x.s > 0)
     .sort((a, b) => b.s - a.s || a.mv.localeCompare(b.mv))

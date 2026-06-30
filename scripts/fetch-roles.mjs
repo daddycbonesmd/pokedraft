@@ -75,7 +75,10 @@ function synthSets(mon, moveNames) {
   const inPool = (list) => list.filter((n) => moveNames.includes(n));
   const md = moveNames.map((n) => Dex.moves.get(n)).filter((m) => m && m.exists);
   const isStab = (m) => mon.types.includes(m.type.toLowerCase());
-  const score = (m) => (m.basePower || 0) + (isStab(m) ? 25 : 0) - (BAD.has(m.name) ? 1000 : 0);
+  // accuracy: `true` = never-miss. Penalise shaky moves (<90%) so a reliable move is
+  // preferred unless a low-accuracy move is clearly stronger ("avoid where you can").
+  const accOf = (m) => (m.accuracy === true ? 100 : (m.accuracy ?? 100));
+  const score = (m) => (m.basePower || 0) + (isStab(m) ? 25 : 0) - (BAD.has(m.name) ? 1000 : 0) - (accOf(m) < 90 ? 40 : 0);
   const phys = md.filter((m) => m.category === "Physical" && m.basePower > 0).sort((a, b) => score(b) - score(a));
   const spec = md.filter((m) => m.category === "Special" && m.basePower > 0).sort((a, b) => score(b) - score(a));
   const physical = (s.atk ?? 0) >= (s.spa ?? 0);
@@ -247,17 +250,39 @@ for (const m of dex) {
   const list = synthSets(m, mp);
   if (list.length) { rolesOut[m.id] = list; synth++; }
 }
-// Mega/Primal formes have a forced forme ability — override the listed ability
-// to match (base species' randbats role would otherwise leave the base ability).
+// Mega/Primal formes battle as the BASE species + the forme's required item (Mega
+// Stone / Orb), so equip that item and keep the base ability — the engine swaps to
+// the forme's ability automatically when it Mega Evolves / Primal Reverts in battle.
 let megaFix = 0;
 for (const m of dex) {
   if (!m.isMega || !rolesOut[m.id]) continue;
   const sp = Dex.species.get(m.name);
-  const ab = sp.exists ? Object.values(sp.abilities)[0] : null;
-  if (ab) { for (const r of rolesOut[m.id]) r.ability = ab; megaFix++; }
+  const stone = sp.exists ? sp.requiredItem : null;
+  if (stone) { for (const r of rolesOut[m.id]) r.item = stone; megaFix++; }
+}
+
+// Reliability pass: swap a shaky (<90% accuracy) attacking move for a same-type,
+// same-category move of comparable power from the movepool when one exists — so the
+// auto-sets avoid sub-90% accuracy "where you can" (a move with no solid alternative,
+// e.g. Focus Blast on a mon with no other Fighting move, is left as-is).
+const accOf = (mv) => { const m = Dex.moves.get(mv); return m && m.exists ? (m.accuracy === true ? 100 : (m.accuracy ?? 100)) : 100; };
+let accFix = 0;
+for (const id of Object.keys(rolesOut)) {
+  const pool = (movepoolsOut[id] || []).map((n) => Dex.moves.get(n))
+    .filter((m) => m && m.exists && m.category !== "Status" && m.basePower > 0 && accOf(m.name) >= 90 && !BAD.has(m.name));
+  for (const role of rolesOut[id]) {
+    for (let i = 0; i < role.moves.length; i++) {
+      const cur = Dex.moves.get(role.moves[i]);
+      if (!cur || !cur.exists || cur.category === "Status" || !cur.basePower || accOf(cur.name) >= 90) continue;
+      const alt = pool
+        .filter((m) => m.type === cur.type && m.category === cur.category && m.basePower >= cur.basePower * 0.7 && !role.moves.includes(m.name))
+        .sort((a, b) => b.basePower - a.basePower)[0];
+      if (alt) { role.moves[i] = alt.name; accFix++; }
+    }
+  }
 }
 await writeFile(new URL("../public/roles.json", import.meta.url), JSON.stringify(rolesOut));
-console.log(`Wrote roles.json (${Object.keys(rolesOut).length} mons; ${synth} synthesized; ${megaFix} mega abilities fixed)`);
+console.log(`Wrote roles.json (${Object.keys(rolesOut).length} mons; ${synth} synthesized; ${megaFix} mega stones equipped; ${accFix} shaky moves swapped)`);
 
 // Fold every move used by a role set back into that mon's movepool. Randbats roles
 // can reference moves the raw @pkmn/dex learnset omits (e.g. Life Dew), which would
@@ -275,6 +300,13 @@ console.log(`Wrote movepools.json (${Object.keys(movepoolsOut).length} mons; fol
 
 // ── species.json (monId → canonical Showdown species name, so teams import cleanly) ──
 function showdownSpecies(m) {
+  // A Mega forme can't be put on a team directly (it can't then Mega Evolve) — the
+  // battle-legal form is the BASE species holding the Mega Stone, which evolves in
+  // battle. So map Mega/Primal formes to their base; the auto-set adds the stone.
+  if (m.isMega) {
+    const base = Dex.species.get(baseName.get(m.baseId) || "");
+    if (base.exists) return base.name;
+  }
   let sp = Dex.species.get(m.name);
   if (!sp.exists) sp = Dex.species.get(FORM_KEY[norm(m.name)] || "");
   if (!sp.exists && m.isMega) sp = Dex.species.get(baseName.get(m.baseId) || "");
@@ -302,8 +334,13 @@ function itemCategory(i) {
   if (i.isPokeball) return "Poké Ball";
   return "Held item";
 }
+// Forme-defining items (Mega Stones, Red/Blue Orb, Rusted Sword/Shield, Griseous
+// Orb, …) are flagged non-standard in Gen 9 but are needed for drafted formes, so
+// keep them even though most other non-standard items are dropped.
+const requiredItems = new Set();
+for (const sp of Dex.species.all()) if (sp.requiredItem) requiredItems.add(sp.requiredItem);
 const itemsOut = Dex.items.all()
-  .filter((i) => i.exists && i.name && !i.isNonstandard && !i.isPokeball)
+  .filter((i) => i.exists && i.name && !i.isPokeball && (!i.isNonstandard || i.megaStone || requiredItems.has(i.name)))
   .map((i) => ({ name: i.name, desc: (i.shortDesc || i.desc || "").replace(/\s+/g, " ").trim(), cat: itemCategory(i) }))
   .sort((a, b) => a.name.localeCompare(b.name));
 await writeFile(new URL("../public/items.json", import.meta.url), JSON.stringify(itemsOut));
