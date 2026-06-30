@@ -106,6 +106,7 @@ export default function Battle({ id }: { id: string }) {
   const playedRef = useRef(-1);
   const firstTimeline = useRef(true);
   const loadedRef = useRef(false);
+  const timelineRef = useRef<Step[]>([]);
 
   useEffect(() => { fetch("/movedex.json").then((r) => r.json()).then(setMovedex).catch(() => {}); }, []);
   useEffect(() => {
@@ -216,34 +217,40 @@ export default function Battle({ id }: { id: string }) {
   const rawLen = snap?.raw?.length ?? 0;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const timeline = useMemo(() => buildTimeline(snap?.raw ?? [], viewer), [rawLen, viewer]);
+  timelineRef.current = timeline; // the play-loop always reads the latest steps
 
-  // Playback driver: when new steps appear, reveal them one at a time on each step's
-  // own delay (≈1.3s per move, quicker for sub-events) so the turn plays out in speed
-  // order. When it reaches the end it drops back to the live final state (cursor −1).
+  // Playback driver: one persistent loop reveals new steps one at a time, each held
+  // for its own delay (2s per move, quicker for sub-events), so a turn plays out in
+  // speed order. It reads `timelineRef` every iteration, so steps appended mid-turn
+  // are picked up smoothly — it never tears down and restarts (which used to flash a
+  // banner past = the "X used X" glitch). When caught up it goes live (cursor −1) and
+  // idles, polling for the next turn's steps.
   useEffect(() => {
-    const len = timeline.length;
-    if (firstTimeline.current) {
-      if (!loadedRef.current) return;        // wait for the first real load
-      firstTimeline.current = false;
-      playedRef.current = len - 1;           // treat everything already present as history
-      setCursor(-1);
-      return;
-    }
-    if (len - 1 <= playedRef.current) return; // nothing new to animate
-    let i = playedRef.current + 1;
+    let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
-    const tick = () => {
-      setCursor(i);
-      playedRef.current = i;
-      const d = timeline[i]?.delayMs ?? 800;
-      if (i >= len - 1) { timer = setTimeout(() => setCursor((c) => (c === len - 1 ? -1 : c)), d); return; }
-      i++;
-      timer = setTimeout(tick, d);
+    const loop = () => {
+      if (cancelled) return;
+      const tl = timelineRef.current;
+      if (firstTimeline.current) {
+        // On first load, skip whatever history is already present (don't replay it).
+        if (loadedRef.current) { firstTimeline.current = false; playedRef.current = tl.length - 1; setCursor(-1); }
+        timer = setTimeout(loop, 150);
+        return;
+      }
+      if (playedRef.current < tl.length - 1) {
+        const i = playedRef.current + 1;
+        playedRef.current = i;
+        setCursor(i);
+        timer = setTimeout(loop, tl[i]?.delayMs ?? 800);
+      } else {
+        setCursor(-1);                 // caught up → live (React dedupes when already −1)
+        timer = setTimeout(loop, 200); // idle-poll for the next turn
+      }
     };
-    tick();
-    return () => clearTimeout(timer);
+    loop();
+    return () => { cancelled = true; clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeline]);
+  }, []);
 
   if (fatal) return <Centered>{fatal} <Link href="/" className="text-coral underline">Home</Link></Centered>;
   if (!snap || !battle) return <Centered><span className="hand text-3xl text-coral">entering the battle…</span></Centered>;

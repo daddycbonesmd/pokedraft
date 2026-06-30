@@ -36,10 +36,12 @@ export default function BattleNotifier() {
       return out;
     };
 
+    const FRESH_MS = 20 * 60 * 1000; // a battle older than 20 min is stale — don't pop it
     const consider = (b: Battle, coachId: string) => {
       const meP1 = b.p1_coach_id === coachId, meP2 = b.p2_coach_id === coachId;
       if ((!meP1 && !meP2) || b.p2_coach_id === null) return;            // not mine, or vs AI
       if (b.status !== "active") return;                                  // already finished
+      if (b.created_at && Date.now() - new Date(b.created_at).getTime() > FRESH_MS) return; // stale/abandoned
       if (dismissed.current.has(b.id)) return;                            // user closed it
       if (typeof window !== "undefined" && window.location.pathname.includes(b.id)) return; // already there
       setInvites((prev) => prev.some((x) => x.id === b.id) ? prev

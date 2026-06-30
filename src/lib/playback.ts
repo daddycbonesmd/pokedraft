@@ -106,7 +106,7 @@ export function buildTimeline(raw: string[], viewer: Viewer): Step[] {
         if (m) { m.species = nick(p[2]) || (p[3]?.split(",")[0] ?? m.species); emit(`${nick(p[2])} transformed!`, "field", 850); }
         break;
       }
-      case "move": emit(`${nick(p[2])} used ${p[3]}!`, "move", 1300, nick(p[2])); break;
+      case "move": emit(`${nick(p[2])} used ${p[3]}!`, "move", 2000, nick(p[2])); break;
       case "cant": emit(`${nick(p[2])} couldn't move${CANT[p[3]] ? ` — ${CANT[p[3]]}` : ""}!`, "fail", 950); break;
       case "-supereffective": emit("It's super effective!", "super", 650); break;
       case "-resisted": emit("It's not very effective…", "resist", 650); break;

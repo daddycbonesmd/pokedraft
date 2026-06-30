@@ -86,6 +86,20 @@ const nick = (idAndName: string) => idAndName.split(": ")[1] ?? idAndName;
 
 const toID = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 const fieldName = (s: string) => s.replace(/^.*?: /, "");
+const cleanEff = (s: string) => (s || "").replace(/^(move|ability|item): /, "");
+const STATUS_DMG: Record<string, string> = { brn: "its burn", psn: "poison", tox: "poison" };
+function hpPct(cond: string): number | null {
+  if (!cond) return null;
+  if (cond.includes("fnt")) return 0;
+  const [hp] = cond.split(" ");
+  const [c, m] = hp.split("/").map(Number);
+  return m ? Math.round((c / m) * 100) : null;
+}
+function fromSource(part: string | undefined): string | null {
+  if (!part || !part.startsWith("[from]")) return null;
+  const raw = part.replace("[from] ", "");
+  return STATUS_DMG[raw] ?? cleanEff(raw);
+}
 
 // Turn the omniscient protocol log into human-readable lines. The omniscient log
 // interleaves a secret + public copy of each event after a |split| marker — we
@@ -123,6 +137,29 @@ function readableLog(log: readonly string[]): string[] {
       case "-ability": o(`${nick(p[2])}'s ${p[3]}!`); break;
       case "-terastallize": o(`${nick(p[2])} Terastallized to ${p[3]}!`); break;
       case "-mega": o(`${nick(p[2])} Mega Evolved!`); break;
+      case "-damage": {
+        if (line.includes("[silent]")) break;
+        const hp = hpPct(p[3]), src = fromSource(p[4]);
+        o(src ? `${nick(p[2])} was hurt by ${src}.${hp != null ? ` (${hp}%)` : ""}`
+              : `${nick(p[2])} dropped to ${hp ?? 0}%.`);
+        break;
+      }
+      case "-heal": {
+        if (line.includes("[silent]")) break;
+        const hp = hpPct(p[3]), src = fromSource(p[4]);
+        o(src ? `${nick(p[2])} was healed by ${src}.${hp != null ? ` (${hp}%)` : ""}` : `${nick(p[2])} restored HP. (${hp ?? 100}%)`);
+        break;
+      }
+      case "-start": {
+        const eff = cleanEff(p[3] ?? "");
+        if (/^g?max$/i.test(eff) || /dynamax/i.test(eff)) o(`${nick(p[2])} ${/gmax/i.test(eff) ? "Gigantamaxed" : "Dynamaxed"}!`);
+        else if (eff) o(`${nick(p[2])}: ${eff}!`);
+        break;
+      }
+      case "-zpower": o(`${nick(p[2])} surrounded itself with its Z-Power!`); break;
+      case "-enditem": o(line.includes("[eat]") ? `${nick(p[2])} ate its ${p[3]}!` : `${nick(p[2])}'s ${p[3]} activated!`); break;
+      case "-activate": { const eff = cleanEff(p[3] ?? ""); if (eff) o(/protect/i.test(eff) ? `${nick(p[2])} protected itself!` : `${nick(p[2])}: ${eff}!`); break; }
+      case "-singleturn": { const eff = cleanEff(p[3] ?? ""); if (/protect/i.test(eff)) o(`${nick(p[2])} protected itself!`); break; }
       case "turn": o(`— Turn ${p[2]} —`); break;
     }
   }
