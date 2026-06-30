@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { loadFormats, loadPokedex, suggestTier, DEFAULT_TIER_VALUES, type Format } from "@/lib/pokedex";
-import { createLeague, type NominationMode, type BattleFormat } from "@/lib/db";
+import { createLeague, GENERATIONS, type NominationMode, type BattleFormat } from "@/lib/db";
 import { supabaseReady } from "@/lib/supabase";
 
 const ALL_FORMAT_ID = "__all_pokemon__";
@@ -145,6 +145,23 @@ export default function HostLeague() {
               </button>
             ))}
           </div>
+        </Field>
+        <Field label="Battle gimmick">
+          <div className="grid grid-cols-2 gap-2">
+            {GENERATIONS.map((g) => (
+              <button
+                key={g.gen}
+                type="button"
+                onClick={() => setGeneration(g.gen)}
+                className="paper text-left p-3 transition"
+                style={generation === g.gen ? { boxShadow: "0 0 0 2.5px var(--coral), 0 8px 16px -12px rgba(44,39,34,0.5)" } : undefined}
+              >
+                <div className="font-display font-bold">{g.gimmick}</div>
+                <div className="text-xs text-ink-soft">{g.gen === 6 ? "Mega Stones only" : `${g.label} · also allows Mega`}</div>
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-ink-soft mt-1">Mega Evolution works in every option (hold a Mega Stone). “Mega” disables the other gimmicks.</p>
         </Field>
         <Field label="Draft format">
           <div className="space-y-2">

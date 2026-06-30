@@ -23,23 +23,27 @@ export type League = {
 
 export type BattleFormat = "singles" | "doubles";
 
-// Which signature gimmick each supported generation brings to a battle. Mega
-// Evolution works in every generation (it's gated by holding a Mega Stone), so
-// it isn't listed here — this is just the headline mechanic per gen.
+// The battle gimmick a league uses, stored in the `generation` column. Three are
+// generation-bound (Tera = Gen 9, Dynamax = Gen 8, Z-Moves = Gen 7, each also
+// allowing Mega via a Stone). The fourth, "Mega" (stored as 6), is Mega-only: it
+// runs on the Gen-9 engine for the full modern dex, with Terastallization hidden.
 export const GENERATIONS = [
   { gen: 9, label: "Gen 9", gimmick: "Terastallization", blurb: "Tera + Mega" },
   { gen: 8, label: "Gen 8", gimmick: "Dynamax / Gigantamax", blurb: "Dynamax + Mega" },
   { gen: 7, label: "Gen 7", gimmick: "Z-Moves", blurb: "Z-Moves + Mega" },
+  { gen: 6, label: "Mega", gimmick: "Mega Evolution only", blurb: "Mega, no Tera" },
 ] as const;
-export const normalizeGen = (g?: number) => (g === 7 || g === 8 ? g : 9);
+export const normalizeGen = (g?: number) => (g === 6 || g === 7 || g === 8 ? g : 9);
+export const isMegaOnly = (g?: number) => normalizeGen(g) === 6;
 
-// The Showdown engine format id used for battles in this league. The generation
-// picks which gimmick is available (Tera/Dynamax/Z); doubles is "bring 4, send 2"
-// (VGC-style): Picked Team Size = 4 restricts the active field to the 4 chosen mons
-// so faint/switch prompts only ever offer those 4 — never the full roster of 6.
+// The Showdown engine format id used for battles in this league. Mega-only (6)
+// uses the Gen-9 engine (Tera is hidden in the UI, not banned). Doubles is "bring
+// 4, send 2" (VGC-style): Picked Team Size = 4 restricts the active field to the 4
+// chosen mons so faint/switch prompts only ever offer those 4 — never all 6.
 export const engineFormat = (f: BattleFormat, generation?: number) => {
   const gen = normalizeGen(generation);
-  const base = `gen${gen}${f === "doubles" ? "doubles" : ""}customgame`;
+  const engineGen = gen === 6 ? 9 : gen;
+  const base = `gen${engineGen}${f === "doubles" ? "doubles" : ""}customgame`;
   return f === "doubles" ? `${base}@@@Picked Team Size = 4` : base;
 };
 

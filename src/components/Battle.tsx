@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Sprites } from "@pkmn/img";
 import { TYPE_COLORS, typeEffectiveness, loadPokedex, type PokeMon } from "@/lib/pokedex";
 import {
-  engineFormat, getBattle, getBattleChoices, getLeagueById, getIdentity,
+  engineFormat, isMegaOnly, getBattle, getBattleChoices, getLeagueById, getIdentity,
   subscribeBattle, submitChoice, finishBattle, reportMatchResult,
   type Battle as BattleRow, type BattleChoice, type BattleFormat,
 } from "@/lib/db";
@@ -258,6 +258,7 @@ export default function Battle({ id }: { id: string }) {
 
   const myChoiceCount = choices.filter((c) => c.side === viewer).length;
   const arena = arenaFor(battle.id);
+  const megaOnly = isMegaOnly(battle.generation);
   const req = snap.request;
   const isPlayer = viewer === "p1" || viewer === "p2";
   const ended = snap.ended || battle.status === "done";
@@ -444,7 +445,7 @@ export default function Battle({ id }: { id: string }) {
               {activeSlots.map((i) => (
                 <SlotChooser
                   key={i} slot={i} req={req!} benched={benched} chosen={pending[i]} gimmick={gimmick[i]}
-                  foes={snap.far.active} foeInfos={foeInfos} attacker={snap.near.active[i]} field={snap.field} gen={battle.generation ?? 9}
+                  foes={snap.far.active} foeInfos={foeInfos} attacker={snap.near.active[i]} field={snap.field} gen={battle.generation ?? 9} megaOnly={megaOnly}
                   movedex={movedex} onMove={(mi, t) => chooseMove(i, mi, t)} onTarget={(fi) => chooseTarget(i, fi)}
                   onSwitch={(pi) => chooseSwitch(i, pi)}
                   onGimmick={(g) => setGimmick((p) => { const n = { ...p }; if (g) n[i] = g; else delete n[i]; return n; })}
@@ -636,9 +637,9 @@ const hpFromCondition = (c: string) => {
   return c?.includes("fnt") ? 0 : max ? Math.round((cur / max) * 100) : 100;
 };
 
-function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, attacker, field, gen, movedex, onMove, onTarget, onSwitch, onGimmick }: {
+function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, attacker, field, gen, megaOnly, movedex, onMove, onTarget, onSwitch, onGimmick }: {
   slot: number; req: Request; benched: { details: string; condition: string; party: number }[]; chosen?: SlotChoice;
-  gimmick?: Gimmick; foes: Slot[]; foeInfos: FoeInfo[]; attacker: Slot; field: FieldState; gen: number; movedex: Record<string, MoveInfo>;
+  gimmick?: Gimmick; foes: Slot[]; foeInfos: FoeInfo[]; attacker: Slot; field: FieldState; gen: number; megaOnly: boolean; movedex: Record<string, MoveInfo>;
   onMove: (moveIndex: number, target: string) => void; onTarget: (foeIndex: number) => void;
   onSwitch: (partyIndex: number) => void; onGimmick: (g?: Gimmick) => void;
 }) {
@@ -681,14 +682,37 @@ function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, atta
           </div>
         </div>
       )}
-      {/* Mega Evolution is the only battle gimmick. */}
-      {!forceSwitch && active && active.canMegaEvo && (
+      {/* Gimmick toggles. Tera is suppressed in Mega-only leagues. */}
+      {!forceSwitch && active && (active.canMegaEvo || (active.canTerastallize && !megaOnly) || active.canDynamax || active.canZMove?.some(Boolean)) && (
         <div className="flex flex-wrap gap-1.5 mb-2">
-          <button onClick={() => onGimmick(gimmick === "mega" ? undefined : "mega")}
-            className="text-xs font-bold rounded px-2 py-1 transition"
-            style={{ background: gimmick === "mega" ? "#a25fb8" : "rgba(162,95,184,0.15)", color: gimmick === "mega" ? "#fff" : "#7d3f93" }}>
-            ⬢ Mega Evolve
-          </button>
+          {active.canMegaEvo && (
+            <button onClick={() => onGimmick(gimmick === "mega" ? undefined : "mega")}
+              className="text-xs font-bold rounded px-2 py-1 transition"
+              style={{ background: gimmick === "mega" ? "#a25fb8" : "rgba(162,95,184,0.15)", color: gimmick === "mega" ? "#fff" : "#7d3f93" }}>
+              ⬢ Mega Evolve
+            </button>
+          )}
+          {active.canTerastallize && !megaOnly && (
+            <button onClick={() => onGimmick(gimmick === "terastallize" ? undefined : "terastallize")}
+              className="text-xs font-bold rounded px-2 py-1 transition"
+              style={{ background: gimmick === "terastallize" ? "#d24f96" : "rgba(210,79,150,0.15)", color: gimmick === "terastallize" ? "#fff" : "#a83274" }}>
+              ✦ Tera {active.canTerastallize}
+            </button>
+          )}
+          {active.canDynamax && (
+            <button onClick={() => onGimmick(gimmick === "dynamax" ? undefined : "dynamax")}
+              className="text-xs font-bold rounded px-2 py-1 transition"
+              style={{ background: gimmick === "dynamax" ? "#d6426b" : "rgba(214,66,107,0.15)", color: gimmick === "dynamax" ? "#fff" : "#b02a52" }}>
+              ◎ {active.maxMoves?.gigantamax ? "Gigantamax" : "Dynamax"}
+            </button>
+          )}
+          {active.canZMove?.some(Boolean) && (
+            <button onClick={() => onGimmick(gimmick === "zmove" ? undefined : "zmove")}
+              className="text-xs font-bold rounded px-2 py-1 transition"
+              style={{ background: gimmick === "zmove" ? "#e0a417" : "rgba(224,164,23,0.15)", color: gimmick === "zmove" ? "#fff" : "#9c7110" }}>
+              ✺ Z-Power
+            </button>
+          )}
         </div>
       )}
       {!forceSwitch && active && (

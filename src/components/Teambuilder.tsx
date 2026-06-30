@@ -157,7 +157,7 @@ export default function Teambuilder({ code }: { code: string }) {
           <p className="text-sm text-ink-soft">
             League <span className="font-mono font-bold">{code}</span> ·{" "}
             <span className="capitalize font-semibold text-ink">{battleFormat}</span> ·{" "}
-            <span className="font-semibold text-ink">Mega gimmick</span> · {readyCount}/{mons.length} ready ·{" "}
+            <span className="font-semibold text-ink">{generation === 6 ? "Mega" : generation === 7 ? "Z-Move" : generation === 8 ? "Dynamax" : "Tera"} gimmick</span> · {readyCount}/{mons.length} ready ·{" "}
             {saved === "saving" ? "saving…" : saved === "ok" ? "saved" : ""}
             {dupItems.length > 0 && <span className="text-coral font-semibold"> · ⚠ duplicate item: {dupItems.join(", ")}</span>}
           </p>
