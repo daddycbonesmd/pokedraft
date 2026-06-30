@@ -762,7 +762,7 @@ function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, atta
                             vs {liveFoeSlots[k].species}: {d.immune ? "No effect" : `${round1(d.loPct)}–${round1(d.hiPct)}% (${d.lo}–${d.hi})${d.ko ? " · " + d.ko : ""}`}
                           </span>
                         ))}
-                        <span className="block opacity-50 mt-0.5">calc assumes an uninvested foe</span>
+                        <span className="block opacity-50 mt-0.5">vs a max-defensive (252 HP + Def/SpD) foe</span>
                       </span>
                     ) : effs.length > 0 ? (
                       <span className="block mt-1 pt-1 border-t border-white/20">

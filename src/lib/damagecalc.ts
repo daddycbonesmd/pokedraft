@@ -4,8 +4,10 @@
 // field (weather/terrain), and the defender's current HP for the KO read.
 //
 // The attacker is always one of *your* mons, so we know its spread exactly. The
-// defender's EVs/nature/item/ability are hidden, so the calc uses neutral 0-EV
-// defaults — i.e. the figure assumes an uninvested opponent (a useful upper bound).
+// defender's EVs/nature/item/ability are hidden, so we assume a fully defensive
+// spread — max HP + max Def vs a physical move, or max HP + max SpD vs a special
+// move, with the matching boosting nature — i.e. the figure is the damage a hard
+// wall would take (a useful floor: "even their bulkiest build takes at least…").
 import { calculate, Generations, Pokemon, Move, Field } from "@smogon/calc";
 import type { Slot, FieldState } from "./battle";
 
@@ -47,8 +49,13 @@ export function calcDamage(
       status: (attacker.status || "") as never,
       teraType: (attacker.tera || undefined) as never,
     });
+    const move = new Move(G, moveName);
+    // Assume the foe is fully invested in the defence this move targets.
+    const physical = move.category === "Physical";
     const def = new Pokemon(G, defender.species, {
       level: defender.level,
+      evs: physical ? { hp: 252, def: 252 } : { hp: 252, spd: 252 },
+      nature: physical ? "Impish" : "Calm",
       boosts: boostsFor(defender.boosts),
       status: (defender.status || "") as never,
       teraType: (defender.tera || undefined) as never,
@@ -62,7 +69,7 @@ export function calcDamage(
       terrain: (TERRAIN_CALC[field.terrain] || undefined) as never,
       isTrickRoom: field.trickRoom,
     } as never);
-    const res = calculate(G, atk, def, new Move(G, moveName), f);
+    const res = calculate(G, atk, def, move, f);
     const r = res.range();
     if (!r || r[1] === 0) return { loPct: 0, hiPct: 0, lo: 0, hi: 0, ko: "", immune: true };
     let ko = "";
