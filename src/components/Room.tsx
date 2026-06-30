@@ -209,9 +209,10 @@ export default function Room({ code }: { code: string }) {
   const [now, setNow] = useState(() => Date.now());
   const lastBidRef = useRef(Date.now());
   const soldRef = useRef(false);
+  const passedRef = useRef(false);
   const activeLotId = state?.activeLot?.id ?? null;
   const topBidId = state?.bids?.[0]?.id ?? null;
-  useEffect(() => { lastBidRef.current = Date.now(); soldRef.current = false; setNow(Date.now()); }, [activeLotId, topBidId]);
+  useEffect(() => { lastBidRef.current = Date.now(); soldRef.current = false; passedRef.current = false; setNow(Date.now()); }, [activeLotId, topBidId]);
   useEffect(() => {
     if (!activeLotId) return;
     const iv = setInterval(() => setNow(Date.now()), 200);
@@ -224,6 +225,22 @@ export default function Room({ code }: { code: string }) {
     if (admin && lot && top && Date.now() - lastBidRef.current >= 10000) {
       soldRef.current = true;
       sellLot(lot).then(refresh).catch(() => { soldRef.current = false; refresh(); });
+    }
+  }, [now, state, identity, refresh]);
+
+  // ── No-bid auto-pass ─────────────────────────────────────────────
+  // In a bidding auction, a lot nobody bids on within 4s is passed automatically
+  // (the admin client is the authority, mirroring the auto-sell above). Point-buy
+  // and random-team modes don't bid, so they're excluded.
+  useEffect(() => {
+    if (!state || passedRef.current) return;
+    const admin = Boolean(identity?.adminToken && identity.adminToken === state.league.admin_token);
+    const m = state.league.nomination_mode;
+    const auctionMode = m === "admin" || m === "snake" || m === "one_random" || m === "auction_random";
+    const lot = state.activeLot;
+    if (admin && auctionMode && lot && (state.bids?.length ?? 0) === 0 && Date.now() - lastBidRef.current >= 4000) {
+      passedRef.current = true;
+      passLot(lot.id).then(refresh).catch(() => { passedRef.current = false; refresh(); });
     }
   }, [now, state, identity, refresh]);
 
@@ -358,6 +375,11 @@ export default function Room({ code }: { code: string }) {
   const iPick = Boolean(isSnake && me && currentPicker && me.id === currentPicker.id && !isFull(me));
   const isRandomDraft = mode === "full_random";
   const isPointbuy = mode === "pointbuy_random";
+
+  // No-bid pass countdown: in a bidding auction, a lot with no bids passes after 4s.
+  const isAuctionMode = !isSnake && !isRandomDraft && !isPointbuy;
+  const noBidMs = activeLot && bids.length === 0 ? now - lastBidRef.current : 0;
+  const passCountdown = isAuctionMode && activeLot && !highCoach ? Math.max(0, Math.ceil((4000 - noBidMs) / 1000)) : null;
 
   const monValue = (monId: number) => valueForTier(league.pool[monId], league.tier_values);
 
@@ -842,6 +864,15 @@ export default function Room({ code }: { code: string }) {
                     <span key={countdownNum} className="cd-pop font-display text-3xl font-black grid place-items-center rounded-full w-12 h-12 text-white"
                       style={{ background: countdownNum > 0 ? "var(--coral)" : "var(--teal, #2f8f83)" }}>
                       {countdownNum > 0 ? countdownNum : "✓"}
+                    </span>
+                  </div>
+                )}
+                {passCountdown !== null && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-ink-soft">{passCountdown > 0 ? "No bids — passing…" : "Passed"}</span>
+                    <span key={passCountdown} className="cd-pop font-display text-3xl font-black grid place-items-center rounded-full w-12 h-12 text-white"
+                      style={{ background: passCountdown > 0 ? "var(--mustard, #d9a23e)" : "#8a8a8a" }}>
+                      {passCountdown > 0 ? passCountdown : "–"}
                     </span>
                   </div>
                 )}
