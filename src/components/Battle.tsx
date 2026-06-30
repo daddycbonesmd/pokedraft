@@ -681,36 +681,14 @@ function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, atta
           </div>
         </div>
       )}
-      {!forceSwitch && active && (active.canMegaEvo || active.canTerastallize || active.canDynamax || active.canZMove?.some(Boolean)) && (
+      {/* Mega Evolution is the only battle gimmick. */}
+      {!forceSwitch && active && active.canMegaEvo && (
         <div className="flex flex-wrap gap-1.5 mb-2">
-          {active.canMegaEvo && (
-            <button onClick={() => onGimmick(gimmick === "mega" ? undefined : "mega")}
-              className="text-xs font-bold rounded px-2 py-1 transition"
-              style={{ background: gimmick === "mega" ? "#a25fb8" : "rgba(162,95,184,0.15)", color: gimmick === "mega" ? "#fff" : "#7d3f93" }}>
-              ⬢ Mega Evolve
-            </button>
-          )}
-          {active.canTerastallize && (
-            <button onClick={() => onGimmick(gimmick === "terastallize" ? undefined : "terastallize")}
-              className="text-xs font-bold rounded px-2 py-1 transition"
-              style={{ background: gimmick === "terastallize" ? "#d24f96" : "rgba(210,79,150,0.15)", color: gimmick === "terastallize" ? "#fff" : "#a83274" }}>
-              ✦ Tera {active.canTerastallize}
-            </button>
-          )}
-          {active.canDynamax && (
-            <button onClick={() => onGimmick(gimmick === "dynamax" ? undefined : "dynamax")}
-              className="text-xs font-bold rounded px-2 py-1 transition"
-              style={{ background: gimmick === "dynamax" ? "#d6426b" : "rgba(214,66,107,0.15)", color: gimmick === "dynamax" ? "#fff" : "#b02a52" }}>
-              ◎ {active.maxMoves?.gigantamax ? "Gigantamax" : "Dynamax"}
-            </button>
-          )}
-          {active.canZMove?.some(Boolean) && (
-            <button onClick={() => onGimmick(gimmick === "zmove" ? undefined : "zmove")}
-              className="text-xs font-bold rounded px-2 py-1 transition"
-              style={{ background: gimmick === "zmove" ? "#e0a417" : "rgba(224,164,23,0.15)", color: gimmick === "zmove" ? "#fff" : "#9c7110" }}>
-              ✺ Z-Power
-            </button>
-          )}
+          <button onClick={() => onGimmick(gimmick === "mega" ? undefined : "mega")}
+            className="text-xs font-bold rounded px-2 py-1 transition"
+            style={{ background: gimmick === "mega" ? "#a25fb8" : "rgba(162,95,184,0.15)", color: gimmick === "mega" ? "#fff" : "#7d3f93" }}>
+            ⬢ Mega Evolve
+          </button>
         </div>
       )}
       {!forceSwitch && active && (

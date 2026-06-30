@@ -28,25 +28,6 @@ export default function Home() {
           <Link href="/demo" className="text-ink-soft hover:underline">See the demo</Link>
         </div>
       </section>
-
-      {/* Three folded cards explaining the flow */}
-      <section className="mt-20 grid gap-6 sm:grid-cols-3 w-full max-w-4xl">
-        {[
-          { n: "1", t: "Build the format", d: "Choose which Pokémon can be drafted and set their tiers." },
-          { n: "2", t: "Run the auction", d: "Coaches bid from their own devices. You decide when each Pokémon sells." },
-          { n: "3", t: "Keep your team", d: "Your picks are saved. Check your roster whenever you want." },
-        ].map((c, i) => (
-          <div
-            key={c.n}
-            className="paper dogear p-6 text-left"
-            style={{ transform: `rotate(${[-1.5, 0.8, -0.6][i]}deg)` }}
-          >
-            <div className="hand text-5xl text-coral leading-none mb-2">{c.n}</div>
-            <h3 className="font-display text-xl font-bold mb-1">{c.t}</h3>
-            <p className="text-sm text-ink-soft leading-relaxed">{c.d}</p>
-          </div>
-        ))}
-      </section>
     </main>
   );
 }
