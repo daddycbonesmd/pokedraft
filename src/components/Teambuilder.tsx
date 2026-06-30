@@ -24,6 +24,7 @@ export default function Teambuilder({ code }: { code: string }) {
   const [legalItems, setLegalItems] = useState<Set<string> | null>(null);
   const [battleFormat, setBattleFormat] = useState<string>("doubles");
   const [generation, setGeneration] = useState<number>(9);
+  const [itemSort, setItemSort] = useState<"category" | "name">("category");
   const [fatal, setFatal] = useState("");
   const [saved, setSaved] = useState<"idle" | "saving" | "ok">("idle");
   const [copied, setCopied] = useState(false);
@@ -137,10 +138,13 @@ export default function Teambuilder({ code }: { code: string }) {
   if (!mons) return <Centered><span className="hand text-3xl text-coral">loading your team…</span></Centered>;
 
   const readyCount = setsList.filter(setReady).length;
-  // No explicit list = all standard items (Mega Stones are opt-in via the format).
-  // Gen-7 leagues also surface Z-Crystals so players can equip a Z-Move.
-  const baseItems = legalItems ? items.filter((i) => legalItems.has(i.name)) : items.filter((i) => i.cat !== "Mega Stone");
-  const itemOptions = generation === 7 ? [...baseItems, ...Z_CRYSTALS] : baseItems;
+  // A format may restrict items; otherwise everything is on the table — Mega Stones
+  // included (drafted Megas equip theirs to evolve). Gen-7 leagues also get Z-Crystals.
+  const baseItems = legalItems ? items.filter((i) => legalItems.has(i.name)) : items;
+  const withExtras = generation === 7 ? [...baseItems, ...Z_CRYSTALS] : baseItems;
+  const itemOptions = [...withExtras].sort(itemSort === "category"
+    ? (a, b) => a.cat.localeCompare(b.cat) || a.name.localeCompare(b.name)
+    : (a, b) => a.name.localeCompare(b.name));
   const itemCounts: Record<string, number> = {};
   for (const set of setsList) if (set.item) itemCounts[set.item] = (itemCounts[set.item] ?? 0) + 1;
   const dupItems = Object.keys(itemCounts).filter((it) => itemCounts[it] > 1);
@@ -158,7 +162,11 @@ export default function Teambuilder({ code }: { code: string }) {
             {dupItems.length > 0 && <span className="text-coral font-semibold"> · ⚠ duplicate item: {dupItems.join(", ")}</span>}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          <button className="btn btn-ghost text-sm py-2" title="Sort the item menus"
+            onClick={() => setItemSort((s) => (s === "category" ? "name" : "category"))}>
+            ⇅ Items: {itemSort === "category" ? "by type" : "A–Z"}
+          </button>
           {mons.length > 0 && <button className="btn btn-coral text-sm py-2" onClick={autoFillAll} title="Fill every Pokémon with its best recommended set">⚡ Auto-fill all</button>}
           <button className="btn btn-ghost text-sm py-2" onClick={copyTeam}>{copied ? "Copied" : "Export"}</button>
           <Link href={`/room/${code}`} className="btn btn-ghost text-sm py-2">← Room</Link>
