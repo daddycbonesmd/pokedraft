@@ -231,8 +231,7 @@ for (const m of dex) {
   const moves = await legalMoves(m.name.split("-")[0]);
   if (moves && moves.length) movepoolsOut[m.id] = moves;
 }
-await writeFile(new URL("../public/movepools.json", import.meta.url), JSON.stringify(movepoolsOut));
-console.log(`Wrote movepools.json (${Object.keys(movepoolsOut).length} mons)`);
+// (movepools.json is written after roles are built, so role moves can be folded in.)
 
 // ── Synthesize a "Balanced" auto-set for every mon WITHOUT randbats roles ──
 // Any movepool found for a given base species, so sibling forms can borrow it.
@@ -259,6 +258,20 @@ for (const m of dex) {
 }
 await writeFile(new URL("../public/roles.json", import.meta.url), JSON.stringify(rolesOut));
 console.log(`Wrote roles.json (${Object.keys(rolesOut).length} mons; ${synth} synthesized; ${megaFix} mega abilities fixed)`);
+
+// Fold every move used by a role set back into that mon's movepool. Randbats roles
+// can reference moves the raw @pkmn/dex learnset omits (e.g. Life Dew), which would
+// otherwise leave the teambuilder's move suggestions out of sync with the auto-set.
+let folded = 0;
+for (const id of Object.keys(rolesOut)) {
+  const pool = new Set(movepoolsOut[id] ?? []);
+  const before = pool.size;
+  for (const set of rolesOut[id]) for (const mv of set.moves) if (mv) pool.add(mv);
+  if (pool.size !== before) folded++;
+  if (pool.size) movepoolsOut[id] = [...pool].sort();
+}
+await writeFile(new URL("../public/movepools.json", import.meta.url), JSON.stringify(movepoolsOut));
+console.log(`Wrote movepools.json (${Object.keys(movepoolsOut).length} mons; folded role moves into ${folded})`);
 
 // ── species.json (monId → canonical Showdown species name, so teams import cleanly) ──
 function showdownSpecies(m) {
