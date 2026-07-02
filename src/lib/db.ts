@@ -298,7 +298,11 @@ export async function placeBid(opts: {
   if (error) throw error;
 }
 
-export async function sellLot(lot: Lot): Promise<void> {
+// Sell to the standing top bid. Anti-snipe: pass `expectedTopBidId` (the bid that
+// survived the whole countdown) and the sale aborts if a different bid is on top at
+// sale time — a last-millisecond bid can't slip in and win unseen; instead the
+// countdown restarts with that bid on the board for everyone to answer.
+export async function sellLot(lot: Lot, expectedTopBidId?: string): Promise<void> {
   const { data: top } = await supabase
     .from("bids")
     .select()
@@ -307,6 +311,7 @@ export async function sellLot(lot: Lot): Promise<void> {
     .limit(1)
     .maybeSingle();
   if (!top) throw new Error("No bids yet — pass instead, or wait for a bid.");
+  if (expectedTopBidId && top.id !== expectedTopBidId) throw new Error("A late bid came in — going again!");
   const { error } = await supabase
     .from("lots")
     .update({ status: "sold", winner_coach_id: top.coach_id, final_price: top.amount })
@@ -314,7 +319,13 @@ export async function sellLot(lot: Lot): Promise<void> {
   if (error) throw error;
 }
 
-export async function passLot(lotId: string): Promise<void> {
+// Anti-snipe for the no-bid pass too: with `onlyIfNoBids`, a bid that lands in the
+// pass countdown's final instant cancels the pass instead of being swallowed by it.
+export async function passLot(lotId: string, onlyIfNoBids = false): Promise<void> {
+  if (onlyIfNoBids) {
+    const { count } = await supabase.from("bids").select("id", { count: "exact", head: true }).eq("lot_id", lotId);
+    if ((count ?? 0) > 0) throw new Error("A bid came in — the auction continues!");
+  }
   const { error } = await supabase.from("lots").update({ status: "passed" }).eq("id", lotId);
   if (error) throw error;
 }

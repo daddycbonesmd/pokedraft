@@ -222,9 +222,13 @@ export default function Room({ code }: { code: string }) {
     if (!state || soldRef.current) return;
     const admin = Boolean(identity?.adminToken && identity.adminToken === state.league.admin_token);
     const lot = state.activeLot, top = state.bids?.[0];
-    if (admin && lot && top && Date.now() - lastBidRef.current >= 10000) {
+    // Wait for the real bid row before selling (an optimistic stand-in can't be verified).
+    if (admin && lot && top && !String(top.id).startsWith("temp-") && Date.now() - lastBidRef.current >= 10000) {
       soldRef.current = true;
-      sellLot(lot).then(refresh).catch(() => { soldRef.current = false; refresh(); });
+      // Anti-snipe: only sell if `top` is STILL the top bid at sale time. A bid that
+      // sneaks in at the last millisecond aborts the sale and restarts the countdown
+      // (the new top-bid id resets lastBidRef), so it gets full exposure instead.
+      sellLot(lot, top.id).then(refresh).catch(() => { soldRef.current = false; refresh(); });
     }
   }, [now, state, identity, refresh]);
 
@@ -240,7 +244,8 @@ export default function Room({ code }: { code: string }) {
     const lot = state.activeLot;
     if (admin && auctionMode && lot && (state.bids?.length ?? 0) === 0 && Date.now() - lastBidRef.current >= 14000) {
       passedRef.current = true;
-      passLot(lot.id).then(refresh).catch(() => { passedRef.current = false; refresh(); });
+      // onlyIfNoBids: a bid landing in the countdown's last instant cancels the pass.
+      passLot(lot.id, true).then(refresh).catch(() => { passedRef.current = false; refresh(); });
     }
   }, [now, state, identity, refresh]);
 
@@ -894,7 +899,8 @@ export default function Room({ code }: { code: string }) {
                 {isAdmin && (
                   <div className="flex gap-2">
                     {countdownNum === null && highCoach && (
-                      <button className="btn btn-coral" onClick={() => act(() => sellLot(activeLot!))}>Sell now</button>
+                      // Sell to the bid the admin is looking at; a just-arrived higher bid aborts with a message.
+                      <button className="btn btn-coral" onClick={() => act(() => sellLot(activeLot!, highBid && !String(highBid.id).startsWith("temp-") ? highBid.id : undefined))}>Sell now</button>
                     )}
                     <button className="btn btn-ghost" onClick={() => act(() => passLot(activeLot!.id))}>Pass</button>
                   </div>
