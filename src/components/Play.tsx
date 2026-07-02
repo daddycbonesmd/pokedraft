@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  getLeagueByCode, getRoomState, createBattle, listBattles, getIdentity,
+  getLeagueByCode, getRoomState, createBattle, listBattles, getIdentity, subscribeLeagueBattles,
   type Coach, type Battle, type League,
 } from "@/lib/db";
 import { teamToShowdown, setReady } from "@/lib/teambuilder";
@@ -41,6 +41,16 @@ export default function Play({ code }: { code: string }) {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [code]);
   // Warm the heavy battle engine bundle in the background so "Start" is instant.
   useEffect(() => { import("@/lib/battle").catch(() => {}); }, []);
+  // Keep the battle list live (realtime insert + light poll for status flips), so a
+  // battle someone just started shows up to spectate without reloading the page.
+  useEffect(() => {
+    if (!league) return;
+    const refresh = () => listBattles(league.id).then(setBattles).catch(() => {});
+    const unsub = subscribeLeagueBattles(league.id, refresh);
+    const iv = setInterval(refresh, 8000);
+    return () => { unsub(); clearInterval(iv); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [league?.id]);
   // Default the AI opponent to your own team (a mirror match) so practice is one click.
   useEffect(() => { if (!oppTeam && myCoach && canBattle(myCoach)) setOppTeam(myCoach.id); }, [coaches]); // eslint-disable-line
 
@@ -167,16 +177,36 @@ export default function Play({ code }: { code: string }) {
         <p className="text-xs text-ink-soft mt-2">Only coaches with a battle-ready team can play. Build teams on the Team page.</p>
       </div>
 
-      {/* Ongoing / past battles */}
+      {/* Live battles — anyone in the league can watch (players rejoin) */}
+      {battles.some((b) => b.status === "active") && (
+        <>
+          <h2 className="font-display font-bold mt-6 mb-2 flex items-center gap-2"><span className="live-dot" /> Live now</h2>
+          <div className="space-y-2">
+            {battles.filter((b) => b.status === "active").map((b) => {
+              const mine = Boolean(identity?.coachId && (identity.coachId === b.p1_coach_id || identity.coachId === b.p2_coach_id));
+              return (
+                <Link key={b.id} href={`/battle/${b.id}`} className="paper p-3 flex items-center justify-between hover:-translate-y-0.5 transition">
+                  <span className="font-semibold">{b.p1_name} <span className="text-ink-soft">vs</span> {b.p2_name}</span>
+                  <span className="btn btn-coral text-sm py-1.5 px-3">{mine ? "Rejoin" : "👁 Spectate"}</span>
+                </Link>
+              );
+            })}
+          </div>
+          <style jsx>{`
+            .live-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--coral); display: inline-block; animation: livepulse 1.2s ease-in-out infinite; }
+            @keyframes livepulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.8); } }
+          `}</style>
+        </>
+      )}
+
+      {/* Past battles */}
       <h2 className="font-display font-bold mt-6 mb-2">Recent battles</h2>
       <div className="space-y-2">
-        {battles.length === 0 && <p className="text-ink-soft text-sm">No battles yet.</p>}
-        {battles.map((b) => (
+        {battles.every((b) => b.status === "active") && <p className="text-ink-soft text-sm">No finished battles yet.</p>}
+        {battles.filter((b) => b.status !== "active").map((b) => (
           <Link key={b.id} href={`/battle/${b.id}`} className="paper p-3 flex items-center justify-between hover:-translate-y-0.5 transition">
             <span className="font-semibold">{b.p1_name} <span className="text-ink-soft">vs</span> {b.p2_name}</span>
-            <span className="text-sm text-ink-soft">
-              {b.status === "done" ? (b.winner === "tie" ? "tie" : `${b.winner} won`) : "in progress"}
-            </span>
+            <span className="text-sm text-ink-soft">{b.winner === "tie" ? "tie" : b.winner ? `${b.winner} won` : "finished"}</span>
           </Link>
         ))}
       </div>
