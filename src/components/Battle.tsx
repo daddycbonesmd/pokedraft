@@ -294,7 +294,6 @@ export default function Battle({ id }: { id: string }) {
   const benched = (req?.side?.pokemon ?? [])
     .map((p, i) => ({ ...p, party: i + 1 }))
     .filter((p) => !p.active && !p.condition.includes("fnt"));
-  const hasBench = benched.length > 0;
 
   // Live opponents (species + defending types) for the move-effectiveness preview.
   const foeInfos: FoeInfo[] = snap.far.active.map((f) =>
@@ -302,16 +301,22 @@ export default function Battle({ id }: { id: string }) {
   );
 
   // What does each active slot need from the player this request?
-  //  • "switch" — a fainted slot with replacements waiting (forceSwitch + bench)
+  //  • "switch" — a fainted slot with a replacement waiting
   //  • "move"   — a living active Pokémon choosing an action
-  //  • "pass"   — a fainted slot with nothing to send in. This is the doubles
-  //               "last Pokémon fighting alone" case: the engine keeps the dead
-  //               slot in the request (with its old moves!) but no forceSwitch, so
-  //               we must auto-pass it instead of demanding a choice for a corpse.
-  //               Demanding one is what froze the battle when down to one mon.
+  //  • "pass"   — a fainted slot with nothing to send in. Two cases: the engine
+  //               keeps a dead slot in the request (with its old moves!) when
+  //               you're down to one mon, and a double-KO can demand more
+  //               switches than you have bench Pokémon (both faint with one
+  //               left). Only as many fainted slots as there are bench mons ask
+  //               for a switch; the rest auto-pass — otherwise Lock in waits on
+  //               a slot that can never be filled and the battle soft-locks.
   const slotCount = Math.max(req?.active?.length ?? 0, req?.forceSwitch?.length ?? 0) || 1;
   const slotAction = (i: number): "move" | "switch" | "pass" => {
-    if (req?.forceSwitch?.[i]) return hasBench ? "switch" : "pass";
+    if (req?.forceSwitch?.[i]) {
+      let switchSlotsBefore = 0;
+      for (let j = 0; j < i; j++) if (req.forceSwitch[j]) switchSlotsBefore++;
+      return switchSlotsBefore < benched.length ? "switch" : "pass";
+    }
     const fieldMon = snap.near.active[i];
     if (req?.active?.[i] && fieldMon && !fieldMon.fainted) return "move";
     return "pass";
@@ -457,7 +462,11 @@ export default function Battle({ id }: { id: string }) {
             <div className={activeSlots.length > 1 ? "grid sm:grid-cols-2 gap-3" : ""}>
               {activeSlots.map((i) => (
                 <SlotChooser
-                  key={i} slot={i} req={req!} benched={benched} chosen={pending[i]} gimmick={gimmick[i]}
+                  key={i} slot={i} req={req!} chosen={pending[i]} gimmick={gimmick[i]}
+                  benched={benched.filter((b) => !activeSlots.some((s) => {
+                    const c = pending[s]; // a bench mon picked in another slot isn't offered again here
+                    return s !== i && c?.kind === "switch" && c.index === b.party;
+                  }))}
                   foes={snap.far.active} foeInfos={foeInfos} attacker={snap.near.active[i]} field={snap.field} gen={battle.generation ?? 9} megaOnly={megaOnly}
                   movedex={movedex} onMove={(mi, t) => chooseMove(i, mi, t)} onTarget={(fi) => chooseTarget(i, fi)}
                   onSwitch={(pi) => chooseSwitch(i, pi)}
