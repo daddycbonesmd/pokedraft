@@ -248,7 +248,7 @@ export default function Room({ code }: { code: string }) {
   if (fatal) return <Centered>{fatal} <Link href="/" className="text-coral underline">Home</Link></Centered>;
   if (!state || !monMap) return <Centered><span className="hand text-3xl text-coral">opening the room…</span></Centered>;
 
-  const { league, coaches, activeLot, bids, wonLots, finishedCount } = state;
+  const { league, coaches, activeLot, bids, wonLots, passedLots, finishedCount } = state;
   const me = coaches.find((c) => c.id === identity?.coachId) ?? null;
   const isAdmin = Boolean(identity?.adminToken && identity.adminToken === league.admin_token);
 
@@ -308,6 +308,17 @@ export default function Room({ code }: { code: string }) {
     .map((id) => monMap!.get(Number(id)))
     .filter((m): m is PokeMon => Boolean(m) && !soldIds.has(m!.id));
 
+  // A passed Pokémon stays in the pool, but random reveals shouldn't repeat it while
+  // never-offered Pokémon remain: draw from the least-passed mons first, so passed
+  // ones only come back around once everything else has been picked or passed too.
+  const passCount = new Map<number, number>();
+  for (const l of passedLots) passCount.set(l.mon_id, (passCount.get(l.mon_id) ?? 0) + 1);
+  const freshPool = (() => {
+    if (!poolMons.length) return poolMons;
+    const min = Math.min(...poolMons.map((m) => passCount.get(m.id) ?? 0));
+    return poolMons.filter((m) => (passCount.get(m.id) ?? 0) === min);
+  })();
+
   // Search/filter for the nomination & pick grids.
   const poolTypes = [...new Set(poolMons.flatMap((m) => m.types))].sort();
   const poolTiers = ["S", "A", "B", "C", "D"].filter((t) => poolMons.some((m) => league.pool[m.id] === t));
@@ -357,15 +368,15 @@ export default function Room({ code }: { code: string }) {
   const iRevealRandom = isRandomTurn && isAdmin;
 
   function revealRandom() {
-    if (!poolMons.length) return;
-    const m = poolMons[Math.floor(Math.random() * poolMons.length)];
+    if (!freshPool.length) return;
+    const m = freshPool[Math.floor(Math.random() * freshPool.length)];
     nominateMon(m.id);
   }
 
   // Point-buy reveal must persist the real lot before a Buy can target it (no optimistic id).
   function revealForBuy() {
-    if (!poolMons.length) return;
-    const m = poolMons[Math.floor(Math.random() * poolMons.length)];
+    if (!freshPool.length) return;
+    const m = freshPool[Math.floor(Math.random() * freshPool.length)];
     act(() => nominate(league.id, m.id));
   }
 

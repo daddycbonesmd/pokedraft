@@ -82,6 +82,7 @@ export type RoomState = {
   activeLot: Lot | null;
   bids: Bid[]; // bids for the active lot, highest first
   wonLots: Lot[]; // sold lots (rosters are derived from these)
+  passedLots: Lot[]; // passed lots — random reveals re-offer these only once the rest of the pool has gone up
   finishedCount: number; // sold + passed lots — drives whose turn it is to nominate
 };
 
@@ -230,6 +231,7 @@ export async function getRoomState(leagueId: string): Promise<RoomState> {
 
   const activeLot = (lots ?? []).find((l: Lot) => l.status === "active") ?? null;
   const wonLots = (lots ?? []).filter((l: Lot) => l.status === "sold");
+  const passedLots = (lots ?? []).filter((l: Lot) => l.status === "passed");
   const finishedCount = (lots ?? []).filter((l: Lot) => l.status !== "active").length;
 
   let bids: Bid[] = [];
@@ -242,7 +244,7 @@ export async function getRoomState(leagueId: string): Promise<RoomState> {
     bids = data ?? [];
   }
 
-  return { league, coaches: coaches ?? [], activeLot, bids, wonLots, finishedCount };
+  return { league, coaches: coaches ?? [], activeLot, bids, wonLots, passedLots, finishedCount };
 }
 
 // ── Auction actions ────────────────────────────────────────────────
