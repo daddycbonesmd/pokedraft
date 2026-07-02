@@ -13,6 +13,10 @@ import {
   type BattleSet, type RoleSet, type Stat, type ItemInfo,
 } from "@/lib/teambuilder";
 
+// Move details (same /movedex.json the battle screen uses), keyed by move id.
+type MoveInfo = { name: string; type: string; cat: "Physical" | "Special" | "Status"; bp: number; acc: number; pp: number; pr: number; target: string; desc: string };
+const toID = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
 export default function Teambuilder({ code }: { code: string }) {
   const router = useRouter();
   const [mons, setMons] = useState<PokeMon[] | null>(null); // drafted mons (in pool order)
@@ -21,6 +25,7 @@ export default function Teambuilder({ code }: { code: string }) {
   const [roles, setRoles] = useState<Record<string, RoleSet[]>>({});
   const [movepools, setMovepools] = useState<Record<string, string[]>>({});
   const [items, setItems] = useState<ItemInfo[]>([]);
+  const [movedex, setMovedex] = useState<Record<string, MoveInfo>>({});
   const [legalItems, setLegalItems] = useState<Set<string> | null>(null);
   const [battleFormat, setBattleFormat] = useState<string>("doubles");
   const [generation, setGeneration] = useState<number>(9);
@@ -59,10 +64,13 @@ export default function Teambuilder({ code }: { code: string }) {
         const species = sp[m.id] ?? m.display;
         seeded[m.id] = savedById.get(m.id) ?? emptySet(m.id, species, m.abilities);
         seeded[m.id].species = species; // keep canonical name fresh
+        seeded[m.id].level = Math.min(50, seeded[m.id].level || 50); // battles are level 50
       }
       setSets(seeded);
     })();
   }, [code, router]);
+
+  useEffect(() => { fetch("/movedex.json").then((r) => r.json()).then(setMovedex).catch(() => {}); }, []);
 
   // Debounced autosave whenever sets change (after first load).
   const setsList = useMemo(() => (mons ?? []).map((m) => sets[m.id]).filter(Boolean), [mons, sets]);
@@ -183,7 +191,7 @@ export default function Teambuilder({ code }: { code: string }) {
         {mons.map((m) => (
           <SetEditor
             key={m.id} mon={m} set={sets[m.id]}
-            roles={roles[m.id] ?? []} movepool={movepools[m.id] ?? []} items={itemOptions}
+            roles={roles[m.id] ?? []} movepool={movepools[m.id] ?? []} items={itemOptions} movedex={movedex}
             onApplyRole={(role) => applyRole(m.id, role)}
             onField={(patch) => update(m.id, patch)}
             onMove={(i, v) => setMove(m.id, i, v)}
@@ -197,9 +205,9 @@ export default function Teambuilder({ code }: { code: string }) {
 }
 
 function SetEditor({
-  mon, set, roles, movepool, items, onApplyRole, onField, onMove, onEv, onIv,
+  mon, set, roles, movepool, items, movedex, onApplyRole, onField, onMove, onEv, onIv,
 }: {
-  mon: PokeMon; set: BattleSet; roles: RoleSet[]; movepool: string[]; items: ItemInfo[];
+  mon: PokeMon; set: BattleSet; roles: RoleSet[]; movepool: string[]; items: ItemInfo[]; movedex: Record<string, MoveInfo>;
   onApplyRole: (r: RoleSet) => void;
   onField: (patch: Partial<BattleSet>) => void;
   onMove: (i: number, v: string) => void;
@@ -274,10 +282,23 @@ function SetEditor({
           <Label>Moves</Label>
           <datalist id={mpId}>{movepool.map((mv) => <option key={mv} value={mv} />)}</datalist>
           <div className="space-y-1">
-            {moves.map((mv, i) => (
-              <input key={i} list={mpId} value={mv} placeholder={`Move ${i + 1}`}
-                onChange={(e) => onMove(i, e.target.value)} className="tb-input" />
-            ))}
+            {moves.map((mv, i) => {
+              const info = movedex[toID(mv)];
+              return (
+                <div key={i}>
+                  <input list={mpId} value={mv} placeholder={`Move ${i + 1}`}
+                    onChange={(e) => onMove(i, e.target.value)} className="tb-input" />
+                  {info && (
+                    // What the move does, right under the input (hover for the full text).
+                    <p className="text-[10px] text-ink-soft leading-snug px-0.5 truncate"
+                      title={`${info.name} — ${info.type} ${info.cat}\nPower ${info.bp || "—"} · Acc ${info.acc || "—"}${info.pr ? ` · Priority ${info.pr > 0 ? "+" : ""}${info.pr}` : ""}\n${info.desc}`}>
+                      <span className="font-bold uppercase rounded px-1 mr-1 text-white text-[9px]" style={{ background: TYPE_COLORS[info.type.toLowerCase()] ?? "#777" }}>{info.type}</span>
+                      {info.cat} · {info.bp ? `${info.bp} BP` : "—"} · {info.acc ? `${info.acc}%` : "—"} — {info.desc}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
         <div className="space-y-2">
@@ -304,8 +325,8 @@ function SetEditor({
             </div>
             <div>
               <Label>Level</Label>
-              <input type="number" min={1} max={100} className="tb-input" value={set.level}
-                onChange={(e) => onField({ level: Math.max(1, Math.min(100, Number(e.target.value) || 50)) })} />
+              <input type="number" min={1} max={50} className="tb-input" value={set.level}
+                onChange={(e) => onField({ level: Math.max(1, Math.min(50, Number(e.target.value) || 50)) })} />
             </div>
           </div>
         </div>
