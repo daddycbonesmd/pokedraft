@@ -179,21 +179,26 @@ export default function Battle({ id }: { id: string }) {
   // it submits exactly when p2 has an outstanding request (action count > choices made).
   useEffect(() => {
     if (!battle || battle.p2_coach_id !== null || viewer !== "p1") return;
-    let busy = false;
+    let busy = false, lastLen = -1;
     const tick = async () => {
       if (busy) return;
       busy = true;
       try {
+        const ch = await getBattleChoices(id);
+        // Only re-run the (expensive) engine replay when the choice log actually
+        // grew — otherwise p2's outstanding-request status can't have changed. This
+        // keeps a long battle from re-simulating from scratch every 0.9s.
+        if (ch.length === lastLen) return;
         const b = await getBattle(id);
         if (!b || b.status !== "active") return;
-        const ch = await getBattleChoices(id);
         const p2 = replay({
           formatid: engineFormat(b.format as BattleFormat, b.generation),
           p1: { name: b.p1_name, team: b.p1_team }, p2: { name: b.p2_name, team: b.p2_team },
           seed: b.seed, choices: ch.map((c) => ({ side: c.side, choice: c.choice })),
         }, "p2");
         if (p2.owes) await submitChoice(id, "p2", ch.filter((c) => c.side === "p2").length, "default");
-      } finally { busy = false; }
+        else lastLen = ch.length; // caught up; skip re-sim until new choices arrive (leave unset when we submit / on error, so we retry)
+      } catch { /* keep lastLen unset so the next tick retries */ } finally { busy = false; }
     };
     const iv = setInterval(tick, 900);
     return () => clearInterval(iv);
@@ -206,8 +211,16 @@ export default function Battle({ id }: { id: string }) {
   // self-heal to the latest server state. (pending is preserved unless the turn
   // advanced — see the choice-length guard in `run`.)
   useEffect(() => {
-    if (!battle) return;
-    const iv = setInterval(() => { if (battle.status !== "done") runRef.current(); }, 3000);
+    if (!battle || battle.status === "done") return;
+    const iv = setInterval(async () => {
+      try {
+        const [b, ch] = await Promise.all([getBattle(id), getBattleChoices(id)]);
+        // Cheap poll: only trigger the full re-replay when the server state actually
+        // moved (a new choice, or the battle ended). Re-simulating every 3s otherwise
+        // is what made a long battle stutter and the move buttons feel unresponsive.
+        if (b && (ch.length !== prevChoiceLen.current || b.status !== battle.status)) runRef.current();
+      } catch { /* ignore; try again next tick */ }
+    }, 3000);
     return () => clearInterval(iv);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [battle?.id, battle?.status]);

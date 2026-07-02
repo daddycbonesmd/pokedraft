@@ -26,6 +26,7 @@ export default function HostLeague() {
   const [leagueName, setLeagueName] = useState("");
   const [budget, setBudget] = useState(100);
   const [teamSize, setTeamSize] = useState(6);
+  const [maxPool, setMaxPool] = useState<number | "">(""); // cap on how many Pokémon go up for auction ("" = whole format)
   const [mode, setMode] = useState<NominationMode>("one_random");
   const [battleFormat, setBattleFormat] = useState<BattleFormat>("doubles");
   const [generation, setGeneration] = useState<number>(9);
@@ -37,13 +38,14 @@ export default function HostLeague() {
 
   useEffect(() => {
     // Restore an in-progress host form (e.g. after popping over to build a format).
-    let saved: { adminName?: string; leagueName?: string; budget?: number; teamSize?: number; mode?: NominationMode; battleFormat?: BattleFormat; generation?: number; formatId?: string } | null = null;
+    let saved: { adminName?: string; leagueName?: string; budget?: number; teamSize?: number; maxPool?: number | ""; mode?: NominationMode; battleFormat?: BattleFormat; generation?: number; formatId?: string } | null = null;
     try { saved = JSON.parse(sessionStorage.getItem("pokedraft.hostDraft") || "null"); } catch {}
     if (saved) {
       setAdminName(saved.adminName ?? "");
       setLeagueName(saved.leagueName ?? "");
       if (typeof saved.budget === "number") setBudget(saved.budget);
       if (typeof saved.teamSize === "number") setTeamSize(saved.teamSize);
+      if (typeof saved.maxPool === "number") setMaxPool(saved.maxPool);
       if (saved.mode) setMode(saved.mode);
       if (saved.battleFormat) setBattleFormat(saved.battleFormat);
       if (typeof saved.generation === "number") setGeneration(saved.generation);
@@ -74,20 +76,29 @@ export default function HostLeague() {
   // Persist the form on every change so leaving and coming back doesn't lose it.
   useEffect(() => {
     if (!hydrated.current) { hydrated.current = true; return; }
-    sessionStorage.setItem("pokedraft.hostDraft", JSON.stringify({ adminName, leagueName, budget, teamSize, mode, battleFormat, generation, formatId }));
-  }, [adminName, leagueName, budget, teamSize, mode, battleFormat, generation, formatId]);
+    sessionStorage.setItem("pokedraft.hostDraft", JSON.stringify({ adminName, leagueName, budget, teamSize, maxPool, mode, battleFormat, generation, formatId }));
+  }, [adminName, leagueName, budget, teamSize, maxPool, mode, battleFormat, generation, formatId]);
 
   async function start() {
     setError("");
     const fmt = formats?.find((f) => f.id === formatId);
     if (!adminName.trim()) return setError("Enter your name.");
     if (!fmt) return setError("Pick a format to draft from.");
+    // Optionally cap the auction to a random subset of the format's Pokémon.
+    let pool: Record<string, string> = fmt.tiers;
+    if (typeof maxPool === "number" && maxPool > 0) {
+      const ids = Object.keys(fmt.tiers);
+      if (ids.length > maxPool) {
+        for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]]; }
+        pool = Object.fromEntries(ids.slice(0, maxPool).map((k) => [k, fmt.tiers[Number(k)]]));
+      }
+    }
     setBusy(true);
     try {
       const { league } = await createLeague({
         name: leagueName.trim() || "PokéDraft League",
         adminName: adminName.trim(),
-        pool: fmt.tiers,
+        pool,
         budget,
         mode,
         ruleset: fmt.ruleset ? `${fmt.ruleset.name} · ${fmt.ruleset.gimmick}` : "",
@@ -126,6 +137,11 @@ export default function HostLeague() {
         </Field>
         <Field label="Pokémon per team">
           <input type="number" className="input" value={teamSize} min={1} max={24} onChange={(e) => setTeamSize(Number(e.target.value))} />
+        </Field>
+        <Field label="Max Pokémon in the auction">
+          <input type="number" className="input" value={maxPool} min={1} placeholder="Whole format"
+            onChange={(e) => setMaxPool(e.target.value === "" ? "" : Math.max(1, Number(e.target.value)))} />
+          <p className="text-xs text-ink-soft mt-1">Leave blank to auction the whole pool. Set a number to draw that many Pokémon at random from the format.</p>
         </Field>
         <Field label="Battle format">
           <div className="grid grid-cols-2 gap-2">

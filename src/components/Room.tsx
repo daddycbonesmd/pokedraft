@@ -238,7 +238,7 @@ export default function Room({ code }: { code: string }) {
     const m = state.league.nomination_mode;
     const auctionMode = m === "admin" || m === "snake" || m === "one_random" || m === "auction_random";
     const lot = state.activeLot;
-    if (admin && auctionMode && lot && (state.bids?.length ?? 0) === 0 && Date.now() - lastBidRef.current >= 4000) {
+    if (admin && auctionMode && lot && (state.bids?.length ?? 0) === 0 && Date.now() - lastBidRef.current >= 14000) {
       passedRef.current = true;
       passLot(lot.id).then(refresh).catch(() => { passedRef.current = false; refresh(); });
     }
@@ -379,7 +379,7 @@ export default function Room({ code }: { code: string }) {
   // No-bid pass countdown: in a bidding auction, a lot with no bids passes after 4s.
   const isAuctionMode = !isSnake && !isRandomDraft && !isPointbuy;
   const noBidMs = activeLot && bids.length === 0 ? now - lastBidRef.current : 0;
-  const passCountdown = isAuctionMode && activeLot && !highCoach ? Math.max(0, Math.ceil((4000 - noBidMs) / 1000)) : null;
+  const passCountdown = isAuctionMode && activeLot && !highCoach ? Math.max(0, Math.ceil((14000 - noBidMs) / 1000)) : null;
 
   const monValue = (monId: number) => valueForTier(league.pool[monId], league.tier_values);
 
