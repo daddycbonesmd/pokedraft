@@ -786,8 +786,12 @@ export default function Room({ code }: { code: string }) {
           </h1>
           <p className="text-sm text-ink-soft">
             Code <span className="font-mono font-bold tracking-widest">{league.code}</span> ·{" "}
-            {coaches.length} coaches · {MODE_LABEL[mode] ?? mode} · you are{" "}
-            <b style={{ color: me?.color }}>{me?.name ?? "a spectator"}</b>
+            {coaches.length} coaches · {MODE_LABEL[mode] ?? mode} ·{" "}
+            <b className="text-ink">{poolMons.length}</b> left in the pool
+            {/* with pass-and-repeat, also show how many have never been offered */}
+            {passedLots.length > 0 && poolMons.some((m) => !passCount.has(m.id)) &&
+              <> ({poolMons.filter((m) => !passCount.has(m.id)).length} unseen)</>}{" "}
+            · you are <b style={{ color: me?.color }}>{me?.name ?? "a spectator"}</b>
             {isAdmin && " (admin)"}
           </p>
         </div>
