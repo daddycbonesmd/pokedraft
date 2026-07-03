@@ -33,7 +33,12 @@ export type Request = {
     maxMoves?: { maxMoves: { move: string; target: string }[]; gigantamax?: string };
     canZMove?: ({ move: string; target: string } | null)[];
   } | null)[] | null;
-  side?: { name: string; pokemon: { ident: string; details: string; condition: string; active: boolean }[] };
+  side?: { name: string; pokemon: {
+    ident: string; details: string; condition: string; active: boolean;
+    // Your own side also carries the full loadout (hidden for the opponent) — used to
+    // show moves/ability/item when scouting your team on the Team Preview screen.
+    moves?: string[]; ability?: string; baseAbility?: string; item?: string; stats?: Record<string, number>;
+  }[] };
 };
 
 export type Slot = {
@@ -166,6 +171,17 @@ function readableLog(log: readonly string[]): string[] {
   return out;
 }
 
+// Incremental-replay cache. The choice log is append-only and the engine is
+// deterministic, so re-simulating from turn 1 on every realtime tick is pure waste
+// — and that waste grows with the battle's length, which is exactly what made a
+// long battle's move buttons freeze ("time out"). We keep the live Battle object
+// per (teams+seed+format) identity and feed it only the choices appended since last
+// time, turning an O(turns) resim into O(new choices). A tiny LRU caps memory.
+type CacheEntry = { battle: Battle; applied: string[] };
+const REPLAY_CACHE = new Map<string, CacheEntry>();
+const REPLAY_CACHE_MAX = 4;
+const choiceKey = (c: ChoiceEntry) => `${c.side}${c.choice}`;
+
 // Replay a battle from teams + seed + ordered choices using the real engine, and
 // return the viewer's authoritative point of view. The Battle object's per-side
 // isChoiceDone()/requestState tells us reliably whether the viewer still owes a
@@ -174,11 +190,35 @@ export function replay(
   input: { formatid: string; p1: { name: string; team: string }; p2: { name: string; team: string }; seed: number[]; choices: ChoiceEntry[] },
   viewer: Viewer,
 ): BattleSnapshot {
-  const battle = new Battle({ formatid: input.formatid, seed: input.seed } as unknown as ConstructorParameters<typeof Battle>[0]);
-  battle.setPlayer("p1", { name: input.p1.name, team: input.p1.team });
-  battle.setPlayer("p2", { name: input.p2.name, team: input.p2.team });
-  for (const c of input.choices) {
+  const keys = input.choices.map(choiceKey);
+  const cacheKey = `${input.formatid}${input.seed.join(",")}${input.p1.team}${input.p2.team}`;
+  let entry = REPLAY_CACHE.get(cacheKey);
+
+  // Reuse the cached engine only if what we've already applied is a prefix of the
+  // (possibly longer) new choice log. If a shorter/divergent log arrives — e.g. a
+  // realtime read that raced behind another — rebuild from scratch to stay correct.
+  const isPrefix = entry && entry.applied.length <= keys.length &&
+    entry.applied.every((k, i) => k === keys[i]);
+  if (entry && !isPrefix) entry = undefined;
+
+  if (!entry) {
+    const fresh = new Battle({ formatid: input.formatid, seed: input.seed } as unknown as ConstructorParameters<typeof Battle>[0]);
+    fresh.setPlayer("p1", { name: input.p1.name, team: input.p1.team });
+    fresh.setPlayer("p2", { name: input.p2.name, team: input.p2.team });
+    entry = { battle: fresh, applied: [] };
+    REPLAY_CACHE.set(cacheKey, entry);
+    if (REPLAY_CACHE.size > REPLAY_CACHE_MAX) REPLAY_CACHE.delete(REPLAY_CACHE.keys().next().value as string);
+  } else {
+    // Touch for LRU: re-insert so it's the most-recently-used entry.
+    REPLAY_CACHE.delete(cacheKey); REPLAY_CACHE.set(cacheKey, entry);
+  }
+
+  const battle = entry.battle;
+  // Apply only the choices we haven't fed the engine yet.
+  for (let i = entry.applied.length; i < input.choices.length; i++) {
+    const c = input.choices[i];
     try { battle.choose(c.side as PlayerSide, c.choice); } catch { /* skip invalid (stale) choice */ }
+    entry.applied.push(keys[i]);
   }
 
   const sideView = (idx: number, withSet: boolean): SideView => ({

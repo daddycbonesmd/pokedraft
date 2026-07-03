@@ -289,12 +289,18 @@ function SetEditor({
                   <input list={mpId} value={mv} placeholder={`Move ${i + 1}`}
                     onChange={(e) => onMove(i, e.target.value)} className="tb-input" />
                   {info && (
-                    // What the move does, right under the input (hover for the full text).
-                    <p className="text-[10px] text-ink-soft leading-snug px-0.5 truncate"
-                      title={`${info.name} — ${info.type} ${info.cat}\nPower ${info.bp || "—"} · Acc ${info.acc || "—"}${info.pr ? ` · Priority ${info.pr > 0 ? "+" : ""}${info.pr}` : ""}\n${info.desc}`}>
-                      <span className="font-bold uppercase rounded px-1 mr-1 text-white text-[9px]" style={{ background: TYPE_COLORS[info.type.toLowerCase()] ?? "#777" }}>{info.type}</span>
-                      {info.cat} · {info.bp ? `${info.bp} BP` : "—"} · {info.acc ? `${info.acc}%` : "—"} — {info.desc}
-                    </p>
+                    // Full move dossier under the input — nothing clipped.
+                    <div className="mt-0.5 px-0.5 pb-0.5">
+                      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] font-semibold text-ink-soft leading-tight">
+                        <span className="font-bold uppercase rounded px-1 text-white text-[9px]" style={{ background: TYPE_COLORS[info.type.toLowerCase()] ?? "#777" }}>{info.type}</span>
+                        <span>{info.cat}</span>
+                        <span>· {info.bp ? `${info.bp} BP` : "—"}</span>
+                        <span>· {info.acc ? `${info.acc}% acc` : "— acc"}</span>
+                        {info.pp ? <span>· {info.pp} PP</span> : null}
+                        {info.pr ? <span>· Priority {info.pr > 0 ? "+" : ""}{info.pr}</span> : null}
+                      </div>
+                      {info.desc && <p className="text-[10px] text-ink-soft leading-snug mt-0.5">{info.desc}</p>}
+                    </div>
                   )}
                 </div>
               );

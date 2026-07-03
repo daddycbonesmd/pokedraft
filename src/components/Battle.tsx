@@ -100,6 +100,8 @@ export default function Battle({ id }: { id: string }) {
   const runRef = useRef<() => void>(() => {});
   const prevChoiceLen = useRef(0);
   const [movedex, setMovedex] = useState<Record<string, MoveInfo>>({});
+  const [itemNames, setItemNames] = useState<Record<string, string>>({}); // item id → display name
+  const [abilityNames, setAbilityNames] = useState<Record<string, string>>({}); // ability id → display name
   const [dex, setDex] = useState<Map<string, PokeMon>>(new Map());
   // Animated playback: `cursor` is the timeline step currently on screen (−1 = caught
   // up, showing the live final state). `playedRef` is the furthest step we've shown.
@@ -110,6 +112,14 @@ export default function Battle({ id }: { id: string }) {
   const timelineRef = useRef<Step[]>([]);
 
   useEffect(() => { fetch("/movedex.json").then((r) => r.json()).then(setMovedex).catch(() => {}); }, []);
+  useEffect(() => {
+    fetch("/items.json").then((r) => r.json()).then((items: { name: string }[]) => {
+      setItemNames(Object.fromEntries(items.map((it) => [toID(it.name), it.name])));
+    }).catch(() => {});
+    fetch("/abilities.json").then((r) => r.json()).then((abil: Record<string, string>) => {
+      setAbilityNames(Object.fromEntries(Object.keys(abil).map((name) => [toID(name), name])));
+    }).catch(() => {});
+  }, []);
   useEffect(() => {
     loadPokedex().then((list) => {
       const m = new Map<string, PokeMon>();
@@ -451,7 +461,7 @@ export default function Battle({ id }: { id: string }) {
             {!winner || winner === "tie" ? "It's a tie!" : `${winner} wins!`}
           </p>
         ) : inTeamPreview ? (
-          <TeamPreview req={req!} format={battle.format} onConfirm={submitLeads} farTeam={snap.farTeam} farName={snap.far.name} dex={dex} />
+          <TeamPreview req={req!} format={battle.format} onConfirm={submitLeads} farTeam={snap.farTeam} farName={snap.far.name} dex={dex} movedex={movedex} itemNames={itemNames} abilityNames={abilityNames} />
         ) : viewer === "spectator" ? (
           <p className="text-center text-ink-soft">Spectating · turn {snap.turn}</p>
         ) : req?.teamPreview ? (
@@ -577,8 +587,12 @@ function BattleMon({ mon, facing, attacking, tip }: { mon: NonNullable<Slot>; fa
   );
 }
 
-function MonTooltip({ mon, info, revealed, side }: { mon: NonNullable<Slot>; info?: PokeMon; revealed?: string[]; side: "foe" | "ally" }) {
+function MonTooltip({ mon, info, revealed, side, loadout, movedex }: {
+  mon: NonNullable<Slot>; info?: PokeMon; revealed?: string[]; side: "foe" | "ally";
+  loadout?: { ability?: string; item?: string; moves?: string[] }; movedex?: Record<string, MoveInfo>;
+}) {
   const [spMin, spMax] = info ? speedRange(info.stats.spe, mon.level) : [0, 0];
+  const moveName = (id: string) => movedex?.[toID(id)]?.name ?? id.replace(/([a-z])([A-Z0-9])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase());
   return (
     <div className="w-52 rounded-lg p-2.5 shadow-xl text-left text-[11px]" style={{ background: "var(--ink)", color: "var(--paper)" }}>
       <div className="flex items-center justify-between mb-1">
@@ -604,6 +618,26 @@ function MonTooltip({ mon, info, revealed, side }: { mon: NonNullable<Slot>; inf
           <div className="opacity-90">Speed <b>{spMin}–{spMax}</b> <span className="opacity-60">(×1.5 scarf → {Math.floor(spMax * 1.5)})</span></div>
         </>
       ) : <div className="opacity-60">No dex data.</div>}
+      {loadout && (loadout.ability || loadout.item || (loadout.moves?.length ?? 0) > 0) && (
+        // Your own configured set — the full loadout, shown while picking leads.
+        <div className="mt-1.5 pt-1.5 border-t border-white/20 space-y-0.5">
+          {loadout.ability && <div><span className="opacity-60">Ability</span> <b>{loadout.ability}</b></div>}
+          <div><span className="opacity-60">Item</span> <b>{loadout.item || "None"}</b></div>
+          {(loadout.moves?.length ?? 0) > 0 && (
+            <div className="flex flex-wrap gap-1 pt-0.5">
+              {loadout.moves!.map((mv) => {
+                const md = movedex?.[toID(mv)];
+                return (
+                  <span key={mv} className="rounded bg-white/15 px-1.5 py-0.5 flex items-center gap-1">
+                    {md && <span className="uppercase font-bold text-[8px]" style={{ color: TYPE_COLORS[md.type.toLowerCase()] ?? "#bbb" }}>{md.type.slice(0, 3)}</span>}
+                    {moveName(mv)}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
       {(() => {
         const conds: string[] = [];
         if (mon.status) conds.push(STATUS_TEXT[mon.status] ?? mon.status);
@@ -836,9 +870,10 @@ function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, atta
 
 // A single Pokémon thumbnail with a hover dossier — used to scout both teams on
 // the Team Preview screen.
-function PreviewMon({ species, level, dex, facing, badge, outline, onClick }: {
+function PreviewMon({ species, level, dex, facing, badge, outline, onClick, loadout, movedex }: {
   species: string; level: number; dex: Map<string, PokeMon>; facing: "front" | "back";
   badge?: number; outline?: boolean; onClick?: () => void;
+  loadout?: { ability?: string; item?: string; moves?: string[] }; movedex?: Record<string, MoveInfo>;
 }) {
   const url = (Sprites.getPokemon(species, { gen: "ani", side: facing === "front" ? "p2" : "p1" }) as { url: string }).url;
   const mon = { species, level, hpPct: 100, fainted: false, status: "", tera: "", boosts: {}, volatiles: [] };
@@ -849,7 +884,7 @@ function PreviewMon({ species, level, dex, facing, badge, outline, onClick }: {
       <img src={url} alt={species} className="h-12" style={{ imageRendering: "pixelated" }} />
       <div className="text-[10px] truncate w-full text-center">{species}</div>
       <div className={`pointer-events-none absolute z-40 left-1/2 -translate-x-1/2 hidden group-hover:block ${facing === "front" ? "top-full mt-1" : "bottom-full mb-1"}`}>
-        <MonTooltip mon={mon} info={dex.get(toID(species))} side={facing === "front" ? "foe" : "ally"} />
+        <MonTooltip mon={mon} info={dex.get(toID(species))} side={facing === "front" ? "foe" : "ally"} loadout={loadout} movedex={movedex} />
       </div>
     </>
   );
@@ -861,9 +896,10 @@ function PreviewMon({ species, level, dex, facing, badge, outline, onClick }: {
   );
 }
 
-function TeamPreview({ req, format, onConfirm, farTeam, farName, dex }: {
+function TeamPreview({ req, format, onConfirm, farTeam, farName, dex, movedex, itemNames, abilityNames }: {
   req: Request; format: string; onConfirm: (order: number[]) => void;
   farTeam: { species: string; level: number }[]; farName: string; dex: Map<string, PokeMon>;
+  movedex: Record<string, MoveInfo>; itemNames: Record<string, string>; abilityNames: Record<string, string>;
 }) {
   const [order, setOrder] = useState<number[]>([]);
   const mons = req.side?.pokemon ?? [];
@@ -889,9 +925,16 @@ function TeamPreview({ req, format, onConfirm, farTeam, farName, dex }: {
           const n = i + 1, pos = order.indexOf(n);
           const species = p.details.split(",")[0];
           const level = Number(p.details.match(/L(\d+)/)?.[1] ?? 50);
+          const abilId = p.ability || p.baseAbility || "";
+          const loadout = {
+            ability: abilId ? (abilityNames[toID(abilId)] ?? abilId) : "",
+            item: p.item ? (itemNames[toID(p.item)] ?? p.item) : "",
+            moves: p.moves,
+          };
           return (
             <PreviewMon key={n} species={species} level={level} dex={dex} facing="back"
-              badge={pos >= 0 ? pos + 1 : undefined} outline={pos >= 0} onClick={() => toggle(n)} />
+              badge={pos >= 0 ? pos + 1 : undefined} outline={pos >= 0} onClick={() => toggle(n)}
+              loadout={loadout} movedex={movedex} />
           );
         })}
       </div>
