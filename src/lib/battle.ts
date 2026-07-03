@@ -206,9 +206,19 @@ export function replay(
   // Reuse the cached engine only if what we've already applied is a prefix of the
   // (possibly longer) new choice log. If a shorter/divergent log arrives — e.g. a
   // realtime read that raced behind another — rebuild from scratch to stay correct.
-  const isPrefix = entry && entry.applied.length <= keys.length &&
-    entry.applied.every((k, i) => k === keys[i]);
-  if (entry && !isPrefix) entry = undefined;
+  // The choice log is append-only, so what we've already applied and the incoming log
+  // should agree on their common prefix. If incoming EXTENDS applied we apply just the
+  // new choices (fast path). If incoming is SHORTER/equal (a read that raced behind
+  // another) the cache is already ahead on the SAME history, so reuse it as-is — never
+  // rewind, and never pay a full from-scratch resim just because one poller lagged
+  // (that repeated rebuild is what still made long-battle move input stutter). Only a
+  // genuine prefix DIVERGENCE (which shouldn't happen) forces a rebuild.
+  if (entry) {
+    const common = Math.min(entry.applied.length, keys.length);
+    let sameLine = true;
+    for (let i = 0; i < common; i++) if (entry.applied[i] !== keys[i]) { sameLine = false; break; }
+    if (!sameLine) entry = undefined;
+  }
 
   if (!entry) {
     const fresh = new Battle({ formatid: input.formatid, seed: input.seed } as unknown as ConstructorParameters<typeof Battle>[0]);

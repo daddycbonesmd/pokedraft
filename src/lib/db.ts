@@ -411,7 +411,12 @@ export async function listBattles(leagueId: string): Promise<Battle[]> {
 }
 
 export async function getBattleChoices(battleId: string): Promise<BattleChoice[]> {
-  const { data } = await supabase.from("battle_choices").select().eq("battle_id", battleId).order("created_at").order("id");
+  // Deterministic, stable order: (created_at, side, seq). The old `id` tiebreak was a
+  // random UUID, so same-timestamp choices could reorder between reads — which both
+  // thrashed the replay cache and made replays non-deterministic. (side, seq) is unique
+  // per battle, so this order never changes from one read to the next.
+  const { data } = await supabase.from("battle_choices").select().eq("battle_id", battleId)
+    .order("created_at").order("side").order("seq");
   return data ?? [];
 }
 

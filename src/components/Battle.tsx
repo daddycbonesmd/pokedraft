@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Sprites } from "@pkmn/img";
 import { TYPE_COLORS, typeEffectiveness, loadPokedex, type PokeMon } from "@/lib/pokedex";
@@ -63,6 +63,8 @@ const VOLATILE_LABELS: Record<string, { label: string; color: string }> = {
 };
 const volLabels = (vs: string[] | undefined) => (vs ?? []).map((v) => VOLATILE_LABELS[v]).filter(Boolean) as { label: string; color: string }[];
 const toID = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+// Layout effect on the client, plain effect on the server (avoids the SSR warning).
+const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 // Speed at level for the extreme spreads — slowest (0 IV/EV, −nature) to fastest
 // (31 IV / 252 EV, +nature) — so a hovered foe shows a believable speed window.
@@ -107,6 +109,8 @@ export default function Battle({ id }: { id: string }) {
   // Animated playback: `cursor` is the timeline step currently on screen (−1 = caught
   // up, showing the live final state). `playedRef` is the furthest step we've shown.
   const [cursor, setCursor] = useState(-1);
+  const cursorRef = useRef(-1);
+  cursorRef.current = cursor;
   const playedRef = useRef(-1);
   const firstTimeline = useRef(true);
   const loadedRef = useRef(false);
@@ -279,6 +283,19 @@ export default function Battle({ id }: { id: string }) {
 
   // Keep the (full) battle log scrolled to the newest line as events stream in.
   useEffect(() => { const el = logRef.current; if (el) el.scrollTop = el.scrollHeight; }, [snap?.log.length]);
+
+  // Kill the one-frame flash of THIS turn's end result. When a resolved turn lands
+  // while we're showing the live (caught-up) state, the field would paint the new end
+  // state for a frame before the play loop rewinds to animate it. Before that paint,
+  // freeze on the PREVIOUS turn's final step; the loop then reveals the new steps in
+  // order. Runs before paint (layout effect), so the flash never reaches the screen.
+  useIsoLayoutEffect(() => {
+    const tl = timelineRef.current;
+    if (!firstTimeline.current && cursorRef.current === -1 && playedRef.current >= 0 && playedRef.current < tl.length - 1) {
+      setCursor(playedRef.current);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawLen]);
 
   if (fatal) return <Centered>{fatal} <Link href="/" className="text-coral underline">Home</Link></Centered>;
   if (!snap || !battle) return <Centered><span className="hand text-3xl text-coral">entering the battle…</span></Centered>;
