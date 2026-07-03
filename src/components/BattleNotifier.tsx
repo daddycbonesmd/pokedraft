@@ -61,6 +61,9 @@ export default function BattleNotifier() {
       const leagues = await myLeagues();
       if (cancelled) return;
       await scan(leagues);                                                // 1) catch existing invites
+      // Bail if torn down during the scan — otherwise these subscriptions + the 15s
+      // poll below are created AFTER the cleanup ran and leak for the app's lifetime.
+      if (cancelled) return;
       for (const { leagueId, coachId } of leagues) {                      // 2) instant on new inserts
         unsubs.push(subscribeLeagueBattles(leagueId, (b) => consider(b, coachId)));
       }

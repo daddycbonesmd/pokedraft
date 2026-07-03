@@ -151,7 +151,10 @@ const KEY = "pokedraft.formats";
 export function loadFormats(): Format[] {
   if (typeof window === "undefined") return [];
   try {
-    return JSON.parse(localStorage.getItem(KEY) ?? "[]");
+    const parsed = JSON.parse(localStorage.getItem(KEY) ?? "[]");
+    // Guard against valid-but-non-array JSON (e.g. a corrupted value) — callers map/
+    // spread the result, so a non-array would crash every page that lists formats.
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }

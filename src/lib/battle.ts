@@ -209,6 +209,9 @@ function readableLog(log: readonly string[]): string[] {
 type CacheEntry = { battle: Battle; applied: string[] };
 const REPLAY_CACHE = new Map<string, CacheEntry>();
 const REPLAY_CACHE_MAX = 4;
+// Free a @pkmn/sim Battle's internals (it nulls the field + both sides) when we drop
+// it from the cache, so evicted engines don't linger in memory until GC.
+const destroyBattle = (b: Battle) => { try { (b as unknown as { destroy?: () => void }).destroy?.(); } catch { /* older engine builds may lack destroy() */ } };
 const choiceKey = (c: ChoiceEntry) => `${c.side}${c.choice}`;
 
 // Replay a battle from teams + seed + ordered choices using the real engine, and
@@ -237,7 +240,7 @@ export function replay(
     const common = Math.min(entry.applied.length, keys.length);
     let sameLine = true;
     for (let i = 0; i < common; i++) if (entry.applied[i] !== keys[i]) { sameLine = false; break; }
-    if (!sameLine) entry = undefined;
+    if (!sameLine) { destroyBattle(entry.battle); entry = undefined; } // rebuilding — free the old engine
   }
 
   if (!entry) {
@@ -246,7 +249,13 @@ export function replay(
     fresh.setPlayer("p2", { name: input.p2.name, team: input.p2.team });
     entry = { battle: fresh, applied: [] };
     REPLAY_CACHE.set(cacheKey, entry);
-    if (REPLAY_CACHE.size > REPLAY_CACHE_MAX) REPLAY_CACHE.delete(REPLAY_CACHE.keys().next().value as string);
+    if (REPLAY_CACHE.size > REPLAY_CACHE_MAX) {
+      // Evict the least-recently-used entry and free its (heavy) engine internals.
+      const oldestKey = REPLAY_CACHE.keys().next().value as string;
+      const oldest = REPLAY_CACHE.get(oldestKey);
+      REPLAY_CACHE.delete(oldestKey);
+      if (oldest) destroyBattle(oldest.battle);
+    }
   } else {
     // Touch for LRU: re-insert so it's the most-recently-used entry.
     REPLAY_CACHE.delete(cacheKey); REPLAY_CACHE.set(cacheKey, entry);

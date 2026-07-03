@@ -177,18 +177,24 @@ export default function Room({ code }: { code: string }) {
 
   useEffect(() => {
     if (!supabaseReady) return;
+    let cancelled = false;
     let cleanup = () => {};
     (async () => {
      try {
       const league = await getLeagueByCode(code);
+      if (cancelled) return;
       if (!league) return setFatal("That league code doesn't exist.");
       if (!identity) return router.push(`/join?code=${code}`);
       leagueIdRef.current = league.id;
       const dex = await loadPokedex();
+      if (cancelled) return;
       setMonMap(new Map(dex.map((m) => [m.id, m])));
       loadAbilities().then(setAbilities);
       loadMoves().then(setMoves);
       await refresh();
+      // Guard: bail (or tear down) if the effect was torn down mid-load, so the room
+      // realtime channel isn't orphaned when navigating away / switching leagues fast.
+      if (cancelled) return;
       const sub = subscribeRoom(league.id, (evt) => {
         // Bids are the high-frequency path — apply them instantly from the payload.
         if (evt.table === "bids" && evt.eventType === "INSERT") {
@@ -198,13 +204,14 @@ export default function Room({ code }: { code: string }) {
           refresh();
         }
       });
+      if (cancelled) { sub.unsubscribe(); return; }
       broadcastRef.current = sub.broadcastBid;
       cleanup = sub.unsubscribe;
      } catch {
-      setFatal("Couldn't reach the server — check your connection and refresh.");
+      if (!cancelled) setFatal("Couldn't reach the server — check your connection and refresh.");
      }
     })();
-    return () => cleanup();
+    return () => { cancelled = true; cleanup(); };
   }, [code, identity, router, refresh]);
 
   // ── Auto-sell countdown ──────────────────────────────────────────
@@ -312,33 +319,41 @@ export default function Room({ code }: { code: string }) {
       .catch((e) => { setError(e instanceof Error ? e.message : "Bid failed."); refresh(); });
   }
 
-  const soldIds = new Set(wonLots.map((l) => l.mon_id));
-  const poolMons = Object.keys(league.pool)
-    .map((id) => monMap!.get(Number(id)))
-    .filter((m): m is PokeMon => Boolean(m) && !soldIds.has(m!.id));
-
+  // Pool derivation is O(whole pool) with several map/filter/Set/sort passes. Memoise
+  // it on the room state + dex so it recomputes only when those change — NOT on every
+  // 200ms countdown tick (which re-renders Room ~5×/s during a lot and used to redo all
+  // of this over the entire Pokédex each time).
   // A passed Pokémon stays in the pool, but random reveals shouldn't repeat it while
   // never-offered Pokémon remain: draw from the least-passed mons first, so passed
   // ones only come back around once everything else has been picked or passed too.
-  const passCount = new Map<number, number>();
-  for (const l of passedLots) passCount.set(l.mon_id, (passCount.get(l.mon_id) ?? 0) + 1);
-  const freshPool = (() => {
-    if (!poolMons.length) return poolMons;
-    const min = Math.min(...poolMons.map((m) => passCount.get(m.id) ?? 0));
-    return poolMons.filter((m) => (passCount.get(m.id) ?? 0) === min);
-  })();
+  const { soldIds, poolMons, passCount, freshPool, poolTypes, poolTiers, poolAbilities } = useMemo(() => {
+    const soldIds = new Set(wonLots.map((l) => l.mon_id));
+    const poolMons = Object.keys(league.pool)
+      .map((id) => monMap!.get(Number(id)))
+      .filter((m): m is PokeMon => Boolean(m) && !soldIds.has(m!.id));
+    const passCount = new Map<number, number>();
+    for (const l of passedLots) passCount.set(l.mon_id, (passCount.get(l.mon_id) ?? 0) + 1);
+    const freshPool = (() => {
+      if (!poolMons.length) return poolMons;
+      const min = Math.min(...poolMons.map((m) => passCount.get(m.id) ?? 0));
+      return poolMons.filter((m) => (passCount.get(m.id) ?? 0) === min);
+    })();
+    const poolTypes = [...new Set(poolMons.flatMap((m) => m.types))].sort();
+    const poolTiers = ["S", "A", "B", "C", "D"].filter((t) => poolMons.some((m) => league.pool[m.id] === t));
+    const poolAbilities = [...new Set(poolMons.flatMap((m) => m.abilities))].sort();
+    return { soldIds, poolMons, passCount, freshPool, poolTypes, poolTiers, poolAbilities };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, monMap]);
 
-  // Search/filter for the nomination & pick grids.
-  const poolTypes = [...new Set(poolMons.flatMap((m) => m.types))].sort();
-  const poolTiers = ["S", "A", "B", "C", "D"].filter((t) => poolMons.some((m) => league.pool[m.id] === t));
-  const poolAbilities = [...new Set(poolMons.flatMap((m) => m.abilities))].sort();
-  const filteredPool = poolMons.filter((m) => {
+  // Search/filter for the nomination & pick grids (recompute only when a filter changes).
+  const filteredPool = useMemo(() => poolMons.filter((m) => {
     if (pSearch && !m.display.toLowerCase().includes(pSearch.toLowerCase())) return false;
     if (pType !== "all" && !m.types.includes(pType)) return false;
     if (pTier !== "all" && league.pool[m.id] !== pTier) return false;
     if (pAbility !== "all" && !m.abilities.includes(pAbility)) return false;
     return true;
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [poolMons, pSearch, pType, pTier, pAbility]);
   const poolFilterProps = {
     search: pSearch, setSearch: setPSearch, type: pType, setType: setPType,
     tier: pTier, setTier: setPTier, ability: pAbility, setAbility: setPAbility,

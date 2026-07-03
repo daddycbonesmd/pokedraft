@@ -100,7 +100,8 @@ export default function Battle({ id }: { id: string }) {
   const [code, setCode] = useState("");
   const reported = useRef(false);
   const runRef = useRef<() => void>(() => {});
-  const prevChoiceLen = useRef(0);
+  const prevChoiceLen = useRef(0); // total choice rows last seen (heartbeat change-detection)
+  const prevMyLen = useRef(0);     // the viewer's OWN choice rows last seen (pending-wipe gate)
   const logRef = useRef<HTMLDivElement>(null);
   const [movedex, setMovedex] = useState<Record<string, MoveInfo>>({});
   const [itemNames, setItemNames] = useState<Record<string, string>>({}); // item id → display name
@@ -171,10 +172,14 @@ export default function Battle({ id }: { id: string }) {
       if (cancelled) return;
       setBattle(b); setChoices(ch); setSnap(s);
       loadedRef.current = true;
-      // Only clear an in-progress selection when the turn actually advanced (a new
-      // choice was recorded). Otherwise the safety heartbeat below would wipe the
-      // move the player is mid-way through picking every few seconds.
-      if (ch.length !== prevChoiceLen.current) { setPending({}); setGimmick({}); prevChoiceLen.current = ch.length; }
+      // Clear an in-progress selection only when one of the VIEWER'S OWN choices lands
+      // (their turn advanced), NOT when the total row count grows. Pokémon turns are
+      // simultaneous: the opponent (or the practice AI) can record their choice for this
+      // same turn while you're still picking — keying the wipe on the both-sides total
+      // used to blow away your move/target/armed-gimmick mid-decision every turn.
+      const myLen = ch.filter((c) => c.side === viewer).length;
+      if (myLen !== prevMyLen.current) { setPending({}); setGimmick({}); prevMyLen.current = myLen; }
+      prevChoiceLen.current = ch.length; // keep the heartbeat's cheap change-detection accurate
 
       // Any client persists the result once the engine declares a winner; only the
       // one whose write actually flipped it (finalized) is the authoritative reporter.
@@ -557,7 +562,11 @@ export default function Battle({ id }: { id: string }) {
       <div className="paper mt-4">
         <div className="px-4 pt-3 pb-1 text-[11px] font-bold uppercase tracking-wide text-ink-soft">Battle log</div>
         <div ref={logRef} className="px-4 pb-4 max-h-72 overflow-auto text-sm">
-          {snap.log.map((l, i) => (
+          {/* Render only the tail — a long stall war produces thousands of lines and the
+              box auto-scrolls to the bottom anyway, so windowing keeps the DOM node count
+              (and per-turn reconciliation) constant instead of growing every turn. */}
+          {snap.log.length > 300 && <div className="text-[11px] text-ink-soft/70 italic mb-1">…{snap.log.length - 300} earlier lines</div>}
+          {snap.log.slice(-300).map((l, i) => (
             <div key={i} className={l.startsWith("—") ? "font-semibold text-ink-soft mt-1" : "text-ink"}>{l}</div>
           ))}
         </div>

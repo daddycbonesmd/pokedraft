@@ -37,15 +37,21 @@ export default function TournamentView({ code }: { code: string }) {
 
   useEffect(() => {
     if (!supabaseReady) return;
+    let cancelled = false;
     let cleanup = () => {};
     (async () => {
       const lg = await getLeagueByCode(code);
+      if (cancelled) return;
       if (!lg) return setFatal("That league code doesn't exist.");
       leagueIdRef.current = lg.id;
       await refresh();
-      cleanup = subscribeLeague(lg.id, refresh);
+      // Guard: if the effect was torn down while awaiting, don't subscribe (or if we
+      // just did, tear it down) — otherwise the league channel is orphaned forever.
+      if (cancelled) return;
+      const unsub = subscribeLeague(lg.id, refresh);
+      if (cancelled) unsub(); else cleanup = unsub;
     })();
-    return () => cleanup();
+    return () => { cancelled = true; cleanup(); };
   }, [code, refresh]);
 
   if (!supabaseReady) return <EnvNotice />;
