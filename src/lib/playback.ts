@@ -38,6 +38,14 @@ const STATUS_TEXT: Record<string, string> = {
 };
 const STATUS_DMG: Record<string, string> = { brn: "its burn", psn: "poison", tox: "poison" };
 const CANT: Record<string, string> = { par: "paralysis", slp: "sleep", frz: "being frozen", flinch: "flinching", recharge: "recharging" };
+const PREPARE: Record<string, string> = {
+  fly: "flew up high", bounce: "sprang up", dig: "burrowed underground", dive: "hid underwater",
+  phantomforce: "vanished instantly", shadowforce: "vanished instantly", skydrop: "took its target up",
+  solarbeam: "absorbed light", solarblade: "absorbed light", meteorbeam: "gathered space power",
+  electroshot: "absorbed electricity", skullbash: "lowered its head", skyattack: "glowed harshly",
+  razorwind: "whipped up a whirlwind", freezeshock: "cloaked itself in a freezing light", iceburn: "cloaked itself in freezing air",
+  geomancy: "is absorbing power",
+};
 
 const nick = (tag: string) => tag.split(": ")[1] ?? tag;
 const pos = (tag: string) => tag.slice(0, 3);
@@ -174,6 +182,17 @@ export function buildTimeline(raw: string[], viewer: Viewer): Step[] {
         break;
       }
       case "-sidestart": emit(`${clean(p[3])} set up on ${names[p[2]?.slice(0, 2)] ?? "the"} side!`, "field", 700); break;
+      case "-sideend": emit(`${clean(p[3])} wore off on ${names[p[2]?.slice(0, 2)] ?? "the"} side.`, "field", 650); break;
+      case "-prepare": emit(`${nick(p[2])} ${PREPARE[toID(p[3])] ?? `began charging ${p[3]}`}!`, "info", 900); break;
+      case "-hitcount": emit(`Hit ${p[3]} time${p[3] === "1" ? "" : "s"}!`, "info", 700); break;
+      case "-mustrecharge": emit(`${nick(p[2])} must recharge!`, "info", 750); break;
+      case "-notarget": emit("But there was no target…", "fail", 800); break;
+      case "-item": {
+        const src = p[4]?.startsWith("[from]") ? clean(p[4].replace("[from] ", "")) : "";
+        emit(src ? `${nick(p[2])} obtained ${p[3]}!` : `${nick(p[2])} is holding ${p[3]}!`, "info", 800);
+        break;
+      }
+      case "-transform": { const m = model[pos(p[2])]; if (m && p[3]) m.species = nick(p[3]); emit(`${nick(p[2])} transformed into ${nick(p[3])}!`, "field", 850); break; }
       case "-ability": emit(`${nick(p[2])}'s ${p[3]}!`, "ability", 850); break;
       case "-activate": { const eff = clean(p[3] ?? ""); if (eff) emit(/protect/i.test(eff) ? `${nick(p[2])} protected itself!` : `${nick(p[2])}: ${eff}!`, "info", 750); break; }
       case "-start": {

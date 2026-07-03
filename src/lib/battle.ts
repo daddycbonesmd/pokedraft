@@ -102,6 +102,15 @@ const toID = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 const fieldName = (s: string) => s.replace(/^.*?: /, "");
 const cleanEff = (s: string) => (s || "").replace(/^(move|ability|item): /, "");
 const STATUS_DMG: Record<string, string> = { brn: "its burn", psn: "poison", tox: "poison" };
+// Flavour for the charging turn of two-turn moves (|-prepare|).
+const PREPARE: Record<string, string> = {
+  fly: "flew up high", bounce: "sprang up", dig: "burrowed underground", dive: "hid underwater",
+  phantomforce: "vanished instantly", shadowforce: "vanished instantly", skydrop: "took its target into the sky",
+  solarbeam: "absorbed light", solarblade: "absorbed light", meteorbeam: "began overflowing with space power",
+  electroshot: "absorbed electricity", skullbash: "lowered its head", skyattack: "became cloaked in a harsh light",
+  razorwind: "whipped up a whirlwind", freezeshock: "became cloaked in a freezing light", iceburn: "became cloaked in freezing air",
+  geomancy: "is absorbing power",
+};
 function hpPct(cond: string): number | null {
   if (!cond) return null;
   if (cond.includes("fnt")) return 0;
@@ -148,6 +157,17 @@ function readableLog(log: readonly string[]): string[] {
       case "-fieldstart": o(`${fieldName(p[2])}${/trick ?room/i.test(p[2]) ? " twisted the dimensions" : ""}!`); break;
       case "-fieldend": o(`${fieldName(p[2])} ended.`); break;
       case "-sidestart": o(`${names[p[2].slice(0, 2)] ?? ""}: ${fieldName(p[3])} set up.`.trimStart()); break;
+      case "-sideend": o(`${names[p[2]?.slice(0, 2)] ?? ""}: ${fieldName(p[3])} wore off.`.trimStart()); break;
+      case "-prepare": o(`${nick(p[2])} ${PREPARE[toID(p[3])] ?? `began charging ${p[3]}`}!`); break;
+      case "-hitcount": o(`Hit ${p[3]} time${p[3] === "1" ? "" : "s"}!`); break;
+      case "-mustrecharge": o(`${nick(p[2])} must recharge!`); break;
+      case "-notarget": o("But there was no target…"); break;
+      case "-transform": o(`${nick(p[2])} transformed into ${nick(p[3])}!`); break;
+      case "-item": {
+        const src = p[4]?.startsWith("[from]") ? cleanEff(p[4].replace("[from] ", "")) : "";
+        o(src ? `${nick(p[2])} obtained ${p[3]} (${src})!` : `${nick(p[2])} is holding ${p[3]}!`);
+        break;
+      }
       case "-ability": o(`${nick(p[2])}'s ${p[3]}!`); break;
       case "-terastallize": o(`${nick(p[2])} Terastallized to ${p[3]}!`); break;
       case "-mega": o(`${nick(p[2])} Mega Evolved!`); break;
@@ -254,9 +274,9 @@ export function replay(
       fainted: mon.fainted,
       status: mon.status || "",
       tera: (mon as unknown as { terastallized?: string }).terastallized || "",
-      // Current held item (empty once Knocked Off / Tricked away). Own side only —
-      // the opponent's item stays hidden until the protocol reveals it.
-      item: withSet ? ((mon as unknown as { item?: string }).item || "") : undefined,
+      // Current held item (empty once Knocked Off / Tricked away). Only ever shown to a
+      // player for their OWN side — never to a spectator, and never for the opponent.
+      item: (withSet && viewer !== "spectator") ? ((mon as unknown as { item?: string }).item || "") : undefined,
       boosts: Object.fromEntries(
         Object.entries((mon as unknown as { boosts?: Record<string, number> }).boosts ?? {}).filter(([, v]) => v !== 0),
       ),

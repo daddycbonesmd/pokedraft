@@ -105,6 +105,7 @@ export default function Battle({ id }: { id: string }) {
   const [movedex, setMovedex] = useState<Record<string, MoveInfo>>({});
   const [itemNames, setItemNames] = useState<Record<string, string>>({}); // item id → display name
   const [abilityNames, setAbilityNames] = useState<Record<string, string>>({}); // ability id → display name
+  const [megaByStone, setMegaByStone] = useState<Record<string, string>>({}); // mega-stone id → mega species (for the damage preview)
   const [dex, setDex] = useState<Map<string, PokeMon>>(new Map());
   // Animated playback: `cursor` is the timeline step currently on screen (−1 = caught
   // up, showing the live final state). `playedRef` is the furthest step we've shown.
@@ -123,6 +124,11 @@ export default function Battle({ id }: { id: string }) {
     }).catch(() => {});
     fetch("/abilities.json").then((r) => r.json()).then((abil: Record<string, string>) => {
       setAbilityNames(Object.fromEntries(Object.keys(abil).map((name) => [toID(name), name])));
+    }).catch(() => {});
+    fetch("/megas.json").then((r) => r.json()).then((megas: Record<string, { stone: string; species: string }>) => {
+      const byStone: Record<string, string> = {};
+      for (const m of Object.values(megas)) if (m.stone && m.species) byStone[toID(m.stone)] = m.species;
+      setMegaByStone(byStone);
     }).catch(() => {});
   }, []);
   useEffect(() => {
@@ -511,7 +517,7 @@ export default function Battle({ id }: { id: string }) {
                     return s !== i && c?.kind === "switch" && c.index === b.party;
                   }))}
                   foes={snap.far.active} foeInfos={foeInfos} attacker={snap.near.active[i]} field={snap.field} gen={battle.generation ?? 9} megaOnly={megaOnly}
-                  targetsFor={targetOptionsFor}
+                  targetsFor={targetOptionsFor} megaByStone={megaByStone}
                   movedex={movedex} onMove={(mi, t) => chooseMove(i, mi, t)} onTarget={(ts) => chooseTarget(i, ts)}
                   onSwitch={(pi) => chooseSwitch(i, pi)}
                   onGimmick={(g) => setGimmick((p) => { const n = { ...p }; if (g) n[i] = g; else delete n[i]; return n; })}
@@ -753,10 +759,10 @@ const hpFromCondition = (c: string) => {
   return c?.includes("fnt") ? 0 : max ? Math.round((cur / max) * 100) : 100;
 };
 
-function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, attacker, field, gen, megaOnly, movedex, targetsFor, onMove, onTarget, onSwitch, onGimmick }: {
+function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, attacker, field, gen, megaOnly, movedex, targetsFor, megaByStone, onMove, onTarget, onSwitch, onGimmick }: {
   slot: number; req: Request; benched: { details: string; condition: string; party: number }[]; chosen?: SlotChoice;
   gimmick?: Gimmick; foes: Slot[]; foeInfos: FoeInfo[]; attacker: Slot; field: FieldState; gen: number; megaOnly: boolean; movedex: Record<string, MoveInfo>;
-  targetsFor: (moveTarget: string, callerSlot: number) => TargetOpt[];
+  targetsFor: (moveTarget: string, callerSlot: number) => TargetOpt[]; megaByStone: Record<string, string>;
   onMove: (moveIndex: number, target: string) => void; onTarget: (targetSlot: number) => void;
   onSwitch: (partyIndex: number) => void; onGimmick: (g?: Gimmick) => void;
 }) {
@@ -775,18 +781,29 @@ function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, atta
   // Damage calculator: for each damaging move, the predicted roll vs each live foe.
   // Memoised on the actual battle state so flipping move selections doesn't recompute.
   const liveFoeSlots = foes.filter((f): f is NonNullable<Slot> => Boolean(f && !f.fainted));
+  // If a gimmick is armed, preview the damage of the form the mon will BECOME this turn:
+  // its Mega (mega stats + ability, stone effect gone) or its Tera type (extra STAB).
+  const calcAttacker: Slot = (() => {
+    if (!attacker) return attacker;
+    if (gimmick === "mega") {
+      const megaSpecies = megaByStone[toID(attacker.set?.item ?? "")];
+      if (megaSpecies) return { ...attacker, species: megaSpecies, set: attacker.set ? { ...attacker.set, ability: "", item: "" } : attacker.set };
+    }
+    if (gimmick === "terastallize" && active?.canTerastallize) return { ...attacker, tera: active.canTerastallize };
+    return attacker;
+  })();
   const dmgKey = JSON.stringify([
-    attacker && [attacker.species, attacker.level, attacker.status, attacker.tera, attacker.boosts, attacker.set?.item, attacker.set?.ability],
+    calcAttacker && [calcAttacker.species, calcAttacker.level, calcAttacker.status, calcAttacker.tera, calcAttacker.boosts, calcAttacker.set?.item, calcAttacker.set?.ability],
     liveFoeSlots.map((f) => [f.species, f.level, f.hpPct, f.status, f.tera, f.boosts]),
-    field, gen,
+    field, gen, gimmick ?? "",
   ]);
   const dmg = useMemo(() => {
     const map: Record<string, (DamageResult | null)[]> = {};
-    if (!attacker?.set) return map;
+    if (!calcAttacker?.set) return map;
     for (const mv of active?.moves ?? []) {
       const info = movedex[mv.id];
       if (!info || info.cat === "Status") continue;
-      map[mv.id] = liveFoeSlots.map((f) => calcDamage(gen, attacker, f, mv.move, field));
+      map[mv.id] = liveFoeSlots.map((f) => calcDamage(gen, calcAttacker, f, mv.move, field));
     }
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -857,6 +874,8 @@ function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, atta
             const effTarget = dyna ? dyna.target : zed ? zed.target : mv.target;
             const zLocked = gimmick === "zmove" && !active.canZMove?.[j];
             const disabled = mv.disabled || mv.pp === 0 || zLocked;
+            // Tell the player WHY a move is greyed out instead of leaving them guessing.
+            const disabledReason = mv.pp === 0 ? "No PP left" : zLocked ? "Z-Crystal won't boost this" : mv.disabled ? "Disabled" : "";
             const sel = chosen?.kind === "move" && chosen.index === j + 1;
             const color = info ? (TYPE_COLORS[info.type.toLowerCase()] ?? "#777") : "#777";
             // Effectiveness preview: only damaging moves have a type matchup worth
@@ -866,14 +885,14 @@ function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, atta
             const effs = showEff ? liveFoes.map((f) => ({ f, x: typeEffectiveness(info!.type, f.types) })) : [];
             return (
               <button key={j} disabled={disabled} onClick={() => onMove(j + 1, effTarget)}
-                title={info ? `${label} — ${info.type} ${info.cat}\nPower ${info.bp || "—"} · Acc ${info.acc || "—"} · ${mv.pp}/${mv.maxpp} PP\n${info.desc}` : label}
+                title={(info ? `${label} — ${info.type} ${info.cat}\nPower ${info.bp || "—"} · Acc ${info.acc || "—"} · ${mv.pp}/${mv.maxpp} PP\n${info.desc}` : label) + (disabledReason ? `\n⛔ ${disabledReason}` : "")}
                 className="group relative rounded px-2 py-1.5 text-left text-white disabled:opacity-40 transition"
                 style={{ background: color, boxShadow: sel ? "0 0 0 2.5px var(--ink)" : "inset 0 -2px 0 rgba(0,0,0,0.18)" }}>
                 <div className="flex items-center justify-between gap-1">
                   <span className="text-xs font-bold leading-tight drop-shadow-sm">{label}</span>
                   <span className="text-[11px] opacity-90">{CAT_ICON[info?.cat ?? "Status"]}</span>
                 </div>
-                <div className="text-[9px] opacity-90">{info?.type ?? ""} · {mv.pp}/{mv.maxpp} PP</div>
+                <div className="text-[9px] opacity-90">{disabledReason ? `⛔ ${disabledReason}` : <>{info?.type ?? ""} · {mv.pp}/{mv.maxpp} PP</>}</div>
                 {dmg[mv.id]?.some(Boolean) ? (
                   // Damage roll vs each live foe (a%–b% of its max HP), colour-coded by lethality.
                   <div className="flex flex-wrap gap-0.5 mt-1">
