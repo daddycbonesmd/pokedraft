@@ -7,7 +7,7 @@ import { loadPokedex, spriteSmall, TYPE_COLORS, type PokeMon } from "@/lib/poked
 import { getIdentity, getLeagueByCode, getRoomState, saveTeam } from "@/lib/db";
 import { supabaseReady } from "@/lib/supabase";
 import {
-  STATS, STAT_LABEL, EV_TOTAL_MAX, EV_STAT_MAX, NATURES, natureLabel, TERA_TYPES,
+  STATS, STAT_LABEL, EV_TOTAL_MAX, EV_STAT_MAX, NATURES, natureLabel, NATURE_EFFECTS, TERA_TYPES,
   loadRoles, loadMovepools, loadSpecies, loadItems, loadMegas, Z_CRYSTALS,
   emptySet, setFromRole, setReady, evTotal, teamToShowdown, uniqueItem,
   type BattleSet, type RoleSet, type Stat, type ItemInfo,
@@ -39,8 +39,11 @@ export default function Teambuilder({ code }: { code: string }) {
   const [generation, setGeneration] = useState<number>(9);
   const [itemSort, setItemSort] = useState<"category" | "name">("category");
   const [fatal, setFatal] = useState("");
-  const [saved, setSaved] = useState<"idle" | "saving" | "ok">("idle");
+  const [saved, setSaved] = useState<"idle" | "saving" | "ok" | "error">("idle");
   const [copied, setCopied] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importMsg, setImportMsg] = useState("");
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -115,10 +118,16 @@ export default function Teambuilder({ code }: { code: string }) {
     setSaved("saving");
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      saveTeam(coachId, setsList).then(() => setSaved("ok")).catch(() => setSaved("idle"));
+      saveTeam(coachId, setsList).then(() => setSaved("ok")).catch(() => setSaved("error"));
     }, 700);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
   }, [setsList, coachId, mons]);
+  // Manual retry after a failed save (autosave only re-fires on the next edit).
+  function retrySave() {
+    if (!coachId) return;
+    setSaved("saving");
+    saveTeam(coachId, setsList).then(() => setSaved("ok")).catch(() => setSaved("error"));
+  }
 
   function update(monId: number, patch: Partial<BattleSet>) {
     setSets((s) => ({ ...s, [monId]: { ...s[monId], ...patch } }));
@@ -186,6 +195,63 @@ export default function Teambuilder({ code }: { code: string }) {
     navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); });
   }
 
+  // Every real item id (incl. Z-Crystals, which live outside items.json) — used to
+  // flag typo'd items. Mega Stones are in items.json so they're covered.
+  const validItems = useMemo(() => new Set([...items, ...Z_CRYSTALS].map((i) => toID(i.name))), [items]);
+  // Catch sets that would silently break at battle start: a move/item/ability that
+  // doesn't exist. Only validates once the reference data has loaded (no false alarms).
+  function issuesFor(mon: BuildMon, set?: BattleSet): string[] {
+    if (!set) return [];
+    const out: string[] = [];
+    if (Object.keys(movedex).length) for (const mv of set.moves ?? []) if (mv && !movedex[toID(mv)]) out.push(`Unknown move: ${mv}`);
+    if (items.length && set.item && !validItems.has(toID(set.item))) out.push(`Unknown item: ${set.item}`);
+    if (set.ability && !mon.abilities.includes(set.ability)) out.push(`Illegal ability: ${set.ability}`);
+    return out;
+  }
+
+  // Import a Showdown paste and apply each set to the matching DRAFTED Pokémon (by
+  // species). Sets whose species you didn't draft are skipped. Uses the sim's own
+  // parser (lazy-loaded so it never bloats this page until you actually import).
+  async function applyImport() {
+    setImportMsg("Parsing…");
+    try {
+      const { Teams } = await import("@pkmn/sim");
+      const parsed = Teams.import(importText.trim()) as Array<{ species?: string; name?: string; item?: string; ability?: string; moves?: string[]; nature?: string; evs?: Record<string, number>; ivs?: Record<string, number>; level?: number; teraType?: string }> | null;
+      if (!parsed || parsed.length === 0) { setImportMsg("Couldn't read any sets from that text."); return; }
+      const byName = new Map<string, number>();
+      for (const m of mons ?? []) {
+        const add = (n?: string) => { if (n) { const k = toID(n); if (!byName.has(k)) byName.set(k, m.id); } };
+        add(sets[m.id]?.species); add(m.display); add(m.megaInto);
+      }
+      // Build the result from the CURRENT sets (a functional updater runs deferred, so
+      // its counts would be stale, and mutating counters inside it is impure).
+      const next = { ...sets };
+      let applied = 0; const skipped: string[] = [];
+      for (const ps of parsed) {
+        const raw = toID((ps.species || ps.name || ""));
+        const monId = byName.get(raw) ?? byName.get(raw.replace(/mega.*$/, "")) ?? byName.get(raw.replace(/gmax$/, ""));
+        if (monId == null || !next[monId]) { skipped.push(ps.species || ps.name || "?"); continue; }
+        next[monId] = fixMega({
+          ...next[monId],
+          moves: (ps.moves ?? []).slice(0, 4),
+          ability: ps.ability || next[monId].ability,
+          item: ps.item || "",
+          nature: ps.nature || next[monId].nature,
+          evs: ps.evs ? { ...ps.evs } : {},
+          ivs: ps.ivs ? { ...ps.ivs } : {},
+          tera: ps.teraType || next[monId].tera,
+          level: Math.min(50, ps.level || 50),
+        });
+        applied++;
+      }
+      setSets(next);
+      setImportMsg(`Applied ${applied} set${applied === 1 ? "" : "s"}${skipped.length ? ` · skipped ${skipped.length} not on your team (${skipped.slice(0, 3).join(", ")}${skipped.length > 3 ? "…" : ""})` : ""}.`);
+      if (applied > 0) { setImportText(""); setTimeout(() => setImportOpen(false), 1500); }
+    } catch (e) {
+      setImportMsg("Import failed: " + (e instanceof Error ? e.message : "unrecognised format"));
+    }
+  }
+
   if (!supabaseReady) return <Centered>Supabase isn&apos;t connected.</Centered>;
   if (fatal) return <Centered>{fatal} <Link href="/" className="text-coral underline">Home</Link></Centered>;
   if (!mons) return <Centered><span className="hand text-3xl text-coral">loading your team…</span></Centered>;
@@ -201,6 +267,11 @@ export default function Teambuilder({ code }: { code: string }) {
   const itemCounts: Record<string, number> = {};
   for (const set of setsList) if (set.item) itemCounts[set.item] = (itemCounts[set.item] ?? 0) + 1;
   const dupItems = Object.keys(itemCounts).filter((it) => itemCounts[it] > 1);
+  const allIssues = mons.flatMap((m) => issuesFor(m, sets[m.id]));
+  // Base-species names drafted more than once (e.g. base Charizard + a Charizard Mega)
+  // so the SetEditor can disambiguate the otherwise-identical "Charizard" headers.
+  const baseNameCount: Record<string, number> = {};
+  for (const m of mons) baseNameCount[m.display] = (baseNameCount[m.display] ?? 0) + 1;
 
   return (
     <main className="max-w-3xl mx-auto px-4 py-8">
@@ -212,6 +283,7 @@ export default function Teambuilder({ code }: { code: string }) {
             <span className="capitalize font-semibold text-ink">{battleFormat}</span> ·{" "}
             <span className="font-semibold text-ink">{generation === 6 ? "Mega" : generation === 7 ? "Z-Move" : generation === 8 ? "Dynamax" : "Tera"} gimmick</span> · {readyCount}/{mons.length} ready ·{" "}
             {saved === "saving" ? "saving…" : saved === "ok" ? "saved" : ""}
+            {saved === "error" && <button className="text-coral font-semibold underline" onClick={retrySave}>⚠ save failed — retry</button>}
             {dupItems.length > 0 && <span className="text-coral font-semibold"> · ⚠ duplicate item: {dupItems.join(", ")}</span>}
           </p>
         </div>
@@ -221,10 +293,37 @@ export default function Teambuilder({ code }: { code: string }) {
             ⇅ Items: {itemSort === "category" ? "by type" : "A–Z"}
           </button>
           {mons.length > 0 && <button className="btn btn-coral text-sm py-2" onClick={autoFillAll} title="Fill every Pokémon with its best recommended set">⚡ Auto-fill all</button>}
+          <button className="btn btn-ghost text-sm py-2" onClick={() => { setImportOpen((o) => !o); setImportMsg(""); }} title="Paste a Showdown export to fill your drafted Pokémon">Import</button>
           <button className="btn btn-ghost text-sm py-2" onClick={copyTeam}>{copied ? "Copied" : "Export"}</button>
           <Link href={`/room/${code}`} className="btn btn-ghost text-sm py-2">← Room</Link>
         </div>
       </div>
+
+      {allIssues.length > 0 && (
+        <div className="paper p-3 mb-4 text-sm" style={{ borderLeft: "4px solid var(--coral)" }}>
+          <b className="text-coral">⚠ {allIssues.length} issue{allIssues.length === 1 ? "" : "s"} that would break at battle start:</b>
+          <ul className="mt-1 list-disc list-inside text-ink-soft">
+            {allIssues.slice(0, 6).map((iss, i) => <li key={i}>{iss}</li>)}
+            {allIssues.length > 6 && <li>…and {allIssues.length - 6} more</li>}
+          </ul>
+        </div>
+      )}
+
+      {importOpen && (
+        <div className="paper p-4 mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <b className="font-display">Import a Showdown paste</b>
+            <button className="text-xs text-ink-soft hover:underline" onClick={() => setImportOpen(false)}>close</button>
+          </div>
+          <p className="text-xs text-ink-soft mb-2">Paste one or more sets. Each is applied to the matching Pokémon you drafted; others are skipped. Megas stay on their base form + Stone.</p>
+          <textarea className="w-full h-40 bg-white/60 rounded p-2 text-sm font-mono outline-none" value={importText}
+            onChange={(e) => setImportText(e.target.value)} placeholder={"Garchomp @ Choice Scarf\nAbility: Rough Skin\n- Earthquake\n..."} />
+          <div className="flex items-center gap-2 mt-2">
+            <button className="btn btn-coral text-sm py-2" onClick={applyImport} disabled={!importText.trim()}>Apply</button>
+            {importMsg && <span className="text-xs text-ink-soft">{importMsg}</span>}
+          </div>
+        </div>
+      )}
 
       {mons.length === 0 && (
         <div className="paper p-6 text-center text-ink-soft">
@@ -237,6 +336,8 @@ export default function Teambuilder({ code }: { code: string }) {
           <SetEditor
             key={m.id} mon={m} set={sets[m.id]}
             roles={roles[m.id] ?? []} movepool={movepools[m.id] ?? []} items={itemOptions} movedex={movedex}
+            issues={issuesFor(m, sets[m.id])} validItems={validItems} itemsLoaded={items.length > 0}
+            ambiguous={baseNameCount[m.display] > 1}
             onApplyRole={(role) => applyRole(m.id, role)}
             onField={(patch) => update(m.id, patch)}
             onMove={(i, v) => setMove(m.id, i, v)}
@@ -250,9 +351,10 @@ export default function Teambuilder({ code }: { code: string }) {
 }
 
 function SetEditor({
-  mon, set, roles, movepool, items, movedex, onApplyRole, onField, onMove, onEv, onIv,
+  mon, set, roles, movepool, items, movedex, issues, validItems, itemsLoaded, ambiguous, onApplyRole, onField, onMove, onEv, onIv,
 }: {
   mon: BuildMon; set: BattleSet; roles: RoleSet[]; movepool: string[]; items: ItemInfo[]; movedex: Record<string, MoveInfo>;
+  issues: string[]; validItems: Set<string>; itemsLoaded: boolean; ambiguous: boolean;
   onApplyRole: (r: RoleSet) => void;
   onField: (patch: Partial<BattleSet>) => void;
   onMove: (i: number, v: string) => void;
@@ -264,6 +366,11 @@ function SetEditor({
   const moves = [0, 1, 2, 3].map((i) => set.moves?.[i] ?? "");
   const mpId = `mp-${mon.id}`;
   const itemListId = "all-items";
+  const movesLoaded = Object.keys(movedex).length > 0;
+  const nat = NATURE_EFFECTS[set.nature]; // [boostedStat, loweredStat] | null
+  const unknownItem = itemsLoaded && Boolean(set.item) && !validItems.has(toID(set.item));
+  const illegalAbility = Boolean(set.ability) && !mon.abilities.includes(set.ability);
+  const megaShort = mon.megaInto ? (mon.megaInto.startsWith(mon.display + " ") ? mon.megaInto.slice(mon.display.length + 1) : mon.megaInto) : "";
 
   return (
     <div className="paper p-4" style={{ borderTop: `4px solid ${setReady(set) ? "var(--pine, #2f8f83)" : "var(--paper-edge)"}` }}>
@@ -272,7 +379,12 @@ function SetEditor({
         <img src={spriteSmall(mon.megaInto ? mon.baseId : mon.id)} alt={mon.display} width={48} height={48}
           onError={(e) => { (e.target as HTMLImageElement).src = spriteSmall(mon.baseId); }} />
         <div className="flex-1 min-w-0">
-          <div className="font-display font-bold text-lg leading-tight">{mon.display}</div>
+          <div className="font-display font-bold text-lg leading-tight flex items-center gap-1.5 flex-wrap">
+            {mon.display}
+            {/* Distinguish a Mega's header from its base (esp. if both are drafted). */}
+            {megaShort && <span className="text-[10px] font-bold rounded px-1.5 py-0.5 text-white align-middle" style={{ background: "var(--indigo, #5b6bd6)" }}>→ {megaShort}</span>}
+            {ambiguous && !mon.megaInto && <span className="text-[10px] font-bold rounded px-1.5 py-0.5 text-ink-soft bg-black/10">base form</span>}
+          </div>
           <div className="flex gap-1 mt-0.5">
             {mon.types.map((t) => (
               <span key={t} className="text-[10px] font-bold uppercase tracking-wide rounded px-1.5 py-0.5 text-white"
@@ -286,7 +398,10 @@ function SetEditor({
             </div>
           )}
         </div>
-        {!setReady(set) && <span className="text-xs text-ink-soft italic">needs a move</span>}
+        <div className="text-right shrink-0">
+          {!setReady(set) && <div className="text-xs text-ink-soft italic">needs a move</div>}
+          {issues.length > 0 && <div className="text-[10px] font-bold text-coral" title={issues.join("\n")}>⚠ {issues.length} issue{issues.length === 1 ? "" : "s"}</div>}
+        </div>
       </div>
 
       {/* Base stats — so you can plan a set without leaving the page */}
@@ -335,10 +450,13 @@ function SetEditor({
           <div className="space-y-1">
             {moves.map((mv, i) => {
               const info = movedex[toID(mv)];
+              const unknownMove = movesLoaded && Boolean(mv) && !info;
               return (
                 <div key={i}>
                   <input list={mpId} value={mv} placeholder={`Move ${i + 1}`}
-                    onChange={(e) => onMove(i, e.target.value)} className="tb-input" />
+                    onChange={(e) => onMove(i, e.target.value)} className="tb-input"
+                    style={unknownMove ? { boxShadow: "0 0 0 2px rgba(217,89,76,0.6)" } : undefined} />
+                  {unknownMove && <p className="text-[10px] font-semibold text-coral px-0.5">⚠ not a real move — won&apos;t work in battle</p>}
                   {info && (
                     // Full move dossier under the input — nothing clipped.
                     <div className="mt-0.5 px-0.5 pb-0.5">
@@ -361,16 +479,20 @@ function SetEditor({
         <div className="space-y-2">
           <div>
             <Label>Ability</Label>
-            <select className="tb-input" value={set.ability} onChange={(e) => onField({ ability: e.target.value })}>
-              {!mon.abilities.includes(set.ability) && set.ability && <option value={set.ability}>{set.ability}</option>}
+            <select className="tb-input" value={set.ability} onChange={(e) => onField({ ability: e.target.value })}
+              style={illegalAbility ? { boxShadow: "0 0 0 2px rgba(217,89,76,0.6)" } : undefined}>
+              {illegalAbility && <option value={set.ability}>{set.ability} (not legal)</option>}
               {mon.abilities.map((a) => <option key={a} value={a}>{a}</option>)}
             </select>
+            {illegalAbility && <p className="text-[10px] font-semibold text-coral">⚠ not a legal ability for {mon.display}</p>}
           </div>
           <div>
             <Label>Item</Label>
             <datalist id={itemListId}>{items.map((it) => <option key={it.name} value={it.name}>{it.cat}</option>)}</datalist>
             <input list={itemListId} className="tb-input" value={set.item} placeholder="None"
-              onChange={(e) => onField({ item: e.target.value })} />
+              onChange={(e) => onField({ item: e.target.value })}
+              style={unknownItem ? { boxShadow: "0 0 0 2px rgba(217,89,76,0.6)" } : undefined} />
+            {unknownItem && <p className="text-[10px] font-semibold text-coral">⚠ no such item — will be dropped in battle</p>}
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
@@ -393,23 +515,34 @@ function SetEditor({
       <div className="mt-3">
         <div className="flex items-center justify-between">
           <Label>Nature & EVs</Label>
-          <span className="text-xs text-ink-soft">{total}/{EV_TOTAL_MAX} EVs · <button className="underline" onClick={() => setShowIv((v) => !v)}>{showIv ? "hide IVs" : "IVs"}</button></span>
+          <span className="text-xs text-ink-soft">
+            {total}/{EV_TOTAL_MAX} EVs · <span className={EV_TOTAL_MAX - total < 0 ? "text-coral font-bold" : "font-semibold text-ink"}>{EV_TOTAL_MAX - total} left</span>
+            {" · "}<button className="underline" onClick={() => setShowIv((v) => !v)}>{showIv ? "hide IVs" : "IVs"}</button>
+          </span>
         </div>
         <select className="tb-input mb-2" value={set.nature} onChange={(e) => onField({ nature: e.target.value })}>
           {NATURES.map((n) => <option key={n} value={n}>{natureLabel(n)}</option>)}
         </select>
         <div className="grid grid-cols-6 gap-1.5">
-          {STATS.map((s) => (
+          {STATS.map((s) => {
+            const boosted = nat?.[0] === s, lowered = nat?.[1] === s;
+            return (
             <div key={s} className="text-center">
-              <div className="text-[10px] font-bold text-ink-soft">{STAT_LABEL[s]}</div>
+              <div className="text-[10px] font-bold text-ink-soft flex items-center justify-center gap-0.5">
+                {STAT_LABEL[s]}
+                {boosted && <span className="text-[9px] font-black" style={{ color: "#2f9e54" }} title="Nature-boosted">▲</span>}
+                {lowered && <span className="text-[9px] font-black" style={{ color: "#d24a3d" }} title="Nature-lowered">▼</span>}
+              </div>
               <input type="number" min={0} max={252} className="tb-input text-center px-1" value={set.evs[s] ?? 0}
-                onChange={(e) => onEv(s, Number(e.target.value))} />
+                onChange={(e) => onEv(s, Number(e.target.value))}
+                style={boosted ? { boxShadow: "inset 0 0 0 1.5px rgba(47,158,84,0.5)" } : lowered ? { boxShadow: "inset 0 0 0 1.5px rgba(210,74,61,0.45)" } : undefined} />
               {showIv && (
                 <input type="number" min={0} max={31} className="tb-input text-center px-1 mt-1" value={set.ivs[s] ?? 31}
                   title="IV" onChange={(e) => onIv(s, Number(e.target.value))} />
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
