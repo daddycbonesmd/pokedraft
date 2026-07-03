@@ -101,9 +101,19 @@ export function buildTimeline(raw: string[], viewer: Viewer): Step[] {
         if (started) emit(`${names[key.slice(0, 2)] ?? ""} sent out ${nick(p[2])}!`.trimStart(), "info", 900);
         break;
       }
-      case "detailschange": case "-formechange": {
+      case "detailschange": {
+        // The NEW species is in p[3] ("Charizard-Mega-X, L50, M"); p[2] still carries
+        // the pre-change nickname, so reading it left the sprite stuck on the base form.
+        // Silent here — the paired |-mega| / |-primal| line carries the announcement.
         const m = model[pos(p[2])];
-        if (m) { m.species = nick(p[2]) || (p[3]?.split(",")[0] ?? m.species); emit(`${nick(p[2])} transformed!`, "field", 850); }
+        const next = p[3]?.split(",")[0]?.trim();
+        if (m && next) { m.species = next; emit(null, "info", 150); }
+        break;
+      }
+      case "-formechange": {
+        const m = model[pos(p[2])];
+        const next = p[3]?.split(",")[0]?.trim();
+        if (m && next) { m.species = next; emit(`${nick(p[2])} transformed into ${next}!`, "field", 850); }
         break;
       }
       case "move": emit(`${nick(p[2])} used ${p[3]}!`, "move", 2000, nick(p[2])); break;

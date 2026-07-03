@@ -50,11 +50,13 @@ export type Slot = {
   tera: string;
   boosts: Record<string, number>; // only non-zero stat stages (atk/def/spa/spd/spe/accuracy/evasion)
   volatiles: string[];            // active volatile conditions (leechseed, confusion, taunt, …)
+  item?: string;                  // the mon's CURRENT held item id ("" once lost) — own side only, so a Trick/Knock Off swap is visible
   // Spread details for the damage calculator — only populated for the viewer's own
   // mons (the opponent's EVs/nature/item stay hidden; the calc assumes a default).
   set?: { ability: string; item: string; nature: string; evs: Record<string, number>; ivs: Record<string, number> };
 } | null;
-export type SideView = { name: string; active: Slot[] };
+export type SideCondition = { id: string; name: string; layers?: number };
+export type SideView = { name: string; active: Slot[]; sideConditions: SideCondition[] };
 export type FieldState = { weather: string; terrain: string; trickRoom: boolean };
 export type BattleSnapshot = {
   turn: number;
@@ -86,6 +88,13 @@ const STAT_NAME: Record<string, string> = {
 
 const STATUS_TEXT: Record<string, string> = {
   brn: "burned", par: "paralyzed", psn: "poisoned", tox: "badly poisoned", slp: "put to sleep", frz: "frozen",
+};
+// Persistent side conditions worth surfacing (screens, hazards, tailwind, …), id → label.
+const SIDE_CONDITIONS: Record<string, string> = {
+  reflect: "Reflect", lightscreen: "Light Screen", auroraveil: "Aurora Veil", safeguard: "Safeguard",
+  mist: "Mist", tailwind: "Tailwind", luckychant: "Lucky Chant", stealthrock: "Stealth Rock",
+  spikes: "Spikes", toxicspikes: "Toxic Spikes", stickyweb: "Sticky Web", gmaxsteelsurge: "G-Max Steelsurge",
+  wideguard: "Wide Guard", quickguard: "Quick Guard", craftyshield: "Crafty Shield", matblock: "Mat Block",
 };
 const nick = (idAndName: string) => idAndName.split(": ")[1] ?? idAndName;
 
@@ -221,8 +230,13 @@ export function replay(
     entry.applied.push(keys[i]);
   }
 
+  const sideConditionsOf = (idx: number): SideCondition[] => {
+    const sc = (battle.sides[idx] as unknown as { sideConditions?: Record<string, { id?: string; layers?: number }> }).sideConditions ?? {};
+    return Object.entries(sc).map(([id, v]) => ({ id, name: SIDE_CONDITIONS[id] ?? id, layers: v?.layers }));
+  };
   const sideView = (idx: number, withSet: boolean): SideView => ({
     name: battle.sides[idx].name,
+    sideConditions: sideConditionsOf(idx),
     active: battle.sides[idx].active.map((mon) => mon ? {
       species: mon.species.name,
       level: mon.level,
@@ -230,6 +244,9 @@ export function replay(
       fainted: mon.fainted,
       status: mon.status || "",
       tera: (mon as unknown as { terastallized?: string }).terastallized || "",
+      // Current held item (empty once Knocked Off / Tricked away). Own side only —
+      // the opponent's item stays hidden until the protocol reveals it.
+      item: withSet ? ((mon as unknown as { item?: string }).item || "") : undefined,
       boosts: Object.fromEntries(
         Object.entries((mon as unknown as { boosts?: Record<string, number> }).boosts ?? {}).filter(([, v]) => v !== 0),
       ),

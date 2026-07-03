@@ -8,10 +8,16 @@ import { getIdentity, getLeagueByCode, getRoomState, saveTeam } from "@/lib/db";
 import { supabaseReady } from "@/lib/supabase";
 import {
   STATS, STAT_LABEL, EV_TOTAL_MAX, EV_STAT_MAX, NATURES, natureLabel, TERA_TYPES,
-  loadRoles, loadMovepools, loadSpecies, loadItems, Z_CRYSTALS,
+  loadRoles, loadMovepools, loadSpecies, loadItems, loadMegas, Z_CRYSTALS,
   emptySet, setFromRole, setReady, evTotal, teamToShowdown, uniqueItem,
   type BattleSet, type RoleSet, type Stat, type ItemInfo,
 } from "@/lib/teambuilder";
+
+// A drafted Pokémon shown in the builder. Megas are shown as their BASE form (name,
+// typing, stats, abilities) but keep the drafted Mega id — `megaInto`/`megaStone`
+// mark that it Mega Evolves in battle by holding its Stone.
+type BuildMon = PokeMon & { megaInto?: string; megaStone?: string };
+type MegaMeta = { base: string; stone: string; abilities: string[] };
 
 // Move details (same /movedex.json the battle screen uses), keyed by move id.
 type MoveInfo = { name: string; type: string; cat: "Physical" | "Special" | "Status"; bp: number; acc: number; pp: number; pr: number; target: string; desc: string };
@@ -19,7 +25,9 @@ const toID = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
 export default function Teambuilder({ code }: { code: string }) {
   const router = useRouter();
-  const [mons, setMons] = useState<PokeMon[] | null>(null); // drafted mons (in pool order)
+  const [mons, setMons] = useState<BuildMon[] | null>(null); // drafted mons (in pool order; Megas shown as base form)
+  const [megaInfo, setMegaInfo] = useState<Record<number, MegaMeta>>({}); // mega id → base/stone/base-abilities
+  const [megaStoneNames, setMegaStoneNames] = useState<Set<string>>(new Set());
   const [coachId, setCoachId] = useState<string>("");
   const [sets, setSets] = useState<Record<number, BattleSet>>({});
   const [roles, setRoles] = useState<Record<string, RoleSet[]>>({});
@@ -41,8 +49,8 @@ export default function Teambuilder({ code }: { code: string }) {
       if (!identity) { router.push(`/join?code=${code}`); return; }
       const league = await getLeagueByCode(code);
       if (!league) { setFatal("That league code doesn't exist."); return; }
-      const [state, dex, r, mp, sp, it] = await Promise.all([
-        getRoomState(league.id), loadPokedex(), loadRoles(), loadMovepools(), loadSpecies(), loadItems(),
+      const [state, dex, r, mp, sp, it, megas] = await Promise.all([
+        getRoomState(league.id), loadPokedex(), loadRoles(), loadMovepools(), loadSpecies(), loadItems(), loadMegas(),
       ]);
       const me = state.coaches.find((c) => c.id === identity.coachId);
       if (!me) { setFatal("You're not a coach in this league."); return; }
@@ -51,20 +59,48 @@ export default function Teambuilder({ code }: { code: string }) {
       setGeneration(league.generation ?? 9);
       setLegalItems(league.legal_items ? new Set(league.legal_items) : null);
       setRoles(r); setMovepools(mp); setItems(it);
+      const stoneNames = new Set(it.filter((i) => i.cat === "Mega Stone").map((i) => i.name));
+      setMegaStoneNames(stoneNames);
 
       const monMap = new Map(dex.map((m) => [m.id, m]));
       const draftedIds = state.wonLots.filter((l) => l.winner_coach_id === me.id).map((l) => l.mon_id);
       const drafted = draftedIds.map((id) => monMap.get(id)).filter((m): m is PokeMon => Boolean(m));
-      setMons(drafted);
 
-      // Seed sets from saved team, else empty per drafted mon.
+      // Megas: a drafted Mega is presented (and set up) as its BASE form — base name,
+      // typing, stats, and the pre-Mega ability choices — while remembering which Mega
+      // it becomes and which Stone to auto-hold so it evolves in battle, not before.
+      const mInfo: Record<number, MegaMeta> = {};
+      const build: BuildMon[] = drafted.map((m) => {
+        if (!m.isMega) return m;
+        const baseMon = monMap.get(m.baseId);
+        const meta = megas[String(m.id)];
+        mInfo[m.id] = {
+          base: sp[m.baseId] ?? baseMon?.display ?? m.display,
+          stone: meta?.stone ?? "",
+          abilities: baseMon?.abilities ?? m.abilities,
+        };
+        if (!baseMon) return m;
+        return { ...baseMon, id: m.id, baseId: m.baseId, isMega: true, megaInto: m.display, megaStone: meta?.stone ?? "" };
+      });
+      setMegaInfo(mInfo);
+      setMons(build);
+
+      // Seed sets from saved team, else empty per drafted mon. Megas are normalised to
+      // base species + a pre-Mega ability + their Stone (also migrates older saved Mega
+      // sets that had the Mega ability / no Stone).
       const savedById = new Map((me.team ?? []).map((s) => [s.monId, s]));
       const seeded: Record<number, BattleSet> = {};
-      for (const m of drafted) {
-        const species = sp[m.id] ?? m.display;
-        seeded[m.id] = savedById.get(m.id) ?? emptySet(m.id, species, m.abilities);
-        seeded[m.id].species = species; // keep canonical name fresh
-        seeded[m.id].level = Math.min(50, seeded[m.id].level || 50); // battles are level 50
+      for (const m of build) {
+        const mi = mInfo[m.id];
+        const species = mi ? mi.base : (sp[m.id] ?? m.display);
+        let s = savedById.get(m.id) ?? emptySet(m.id, species, m.abilities);
+        s.species = species; // keep canonical name fresh
+        if (mi) {
+          if (!mi.abilities.includes(s.ability)) s.ability = mi.abilities[0] ?? s.ability; // pre-Mega ability
+          if (mi.stone && (!s.item || stoneNames.has(s.item))) s.item = mi.stone;           // auto-hold the Stone
+        }
+        s.level = Math.min(50, s.level || 50); // battles are level 50
+        seeded[m.id] = s;
       }
       setSets(seeded);
     })();
@@ -87,6 +123,15 @@ export default function Teambuilder({ code }: { code: string }) {
   function update(monId: number, patch: Partial<BattleSet>) {
     setSets((s) => ({ ...s, [monId]: { ...s[monId], ...patch } }));
   }
+  // Keep a Mega's set legal for its pre-Mega form: base species, a base ability, and
+  // its Stone. Applied after auto-sets (whose data is keyed to the Mega form).
+  function fixMega(set: BattleSet): BattleSet {
+    const mi = megaInfo[set.monId];
+    if (!mi) return set;
+    const ability = mi.abilities.includes(set.ability) ? set.ability : (mi.abilities[0] ?? set.ability);
+    const item = set.item && !megaStoneNames.has(set.item) ? set.item : (mi.stone || set.item);
+    return { ...set, species: mi.base, ability, item };
+  }
   // Fill every drafted Pokémon with its best (first) auto-set, no duplicate items.
   function autoFillAll() {
     setSets((s) => {
@@ -95,7 +140,7 @@ export default function Teambuilder({ code }: { code: string }) {
       for (const m of mons ?? []) {
         const r = roles[m.id]?.[0];
         if (!r) continue;
-        const set = setFromRole(m.id, next[m.id].species, r);
+        const set = fixMega(setFromRole(m.id, next[m.id].species, r));
         set.item = uniqueItem(set.item, used);
         if (set.item) used.add(set.item);
         next[m.id] = set;
@@ -107,7 +152,7 @@ export default function Teambuilder({ code }: { code: string }) {
   function applyRole(monId: number, role: RoleSet) {
     setSets((s) => {
       const used = new Set<string>(Object.values(s).filter((x) => x.monId !== monId && x.item).map((x) => x.item));
-      const set = setFromRole(monId, s[monId].species, role);
+      const set = fixMega(setFromRole(monId, s[monId].species, role));
       set.item = uniqueItem(set.item, used);
       return { ...s, [monId]: set };
     });
@@ -207,7 +252,7 @@ export default function Teambuilder({ code }: { code: string }) {
 function SetEditor({
   mon, set, roles, movepool, items, movedex, onApplyRole, onField, onMove, onEv, onIv,
 }: {
-  mon: PokeMon; set: BattleSet; roles: RoleSet[]; movepool: string[]; items: ItemInfo[]; movedex: Record<string, MoveInfo>;
+  mon: BuildMon; set: BattleSet; roles: RoleSet[]; movepool: string[]; items: ItemInfo[]; movedex: Record<string, MoveInfo>;
   onApplyRole: (r: RoleSet) => void;
   onField: (patch: Partial<BattleSet>) => void;
   onMove: (i: number, v: string) => void;
@@ -224,7 +269,7 @@ function SetEditor({
     <div className="paper p-4" style={{ borderTop: `4px solid ${setReady(set) ? "var(--pine, #2f8f83)" : "var(--paper-edge)"}` }}>
       <div className="flex items-center gap-3">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={spriteSmall(mon.id)} alt={mon.display} width={48} height={48}
+        <img src={spriteSmall(mon.megaInto ? mon.baseId : mon.id)} alt={mon.display} width={48} height={48}
           onError={(e) => { (e.target as HTMLImageElement).src = spriteSmall(mon.baseId); }} />
         <div className="flex-1 min-w-0">
           <div className="font-display font-bold text-lg leading-tight">{mon.display}</div>
@@ -234,6 +279,12 @@ function SetEditor({
                 style={{ background: TYPE_COLORS[t] }}>{t}</span>
             ))}
           </div>
+          {mon.megaInto && (
+            // Pre-Mega form: base stats/ability now; Mega Evolves in battle via its Stone.
+            <div className="text-[10px] text-ink-soft mt-0.5">
+              ⬢ Mega Evolves into <b className="text-ink">{mon.megaInto}</b> in battle{mon.megaStone ? <> · holds <b className="text-ink">{mon.megaStone}</b></> : ""}. Pick its <b className="text-ink">pre-Mega</b> ability below.
+            </div>
+          )}
         </div>
         {!setReady(set) && <span className="text-xs text-ink-soft italic">needs a move</span>}
       </div>

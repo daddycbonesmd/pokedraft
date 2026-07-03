@@ -10,14 +10,14 @@ import {
   type Battle as BattleRow, type BattleChoice, type BattleFormat,
 } from "@/lib/db";
 import {
-  replay, type BattleSnapshot, type Viewer, type Request, type Slot, type FieldState,
+  replay, type BattleSnapshot, type Viewer, type Request, type Slot, type FieldState, type SideCondition,
 } from "@/lib/battle";
 import { buildTimeline, type Step, type BannerTone } from "@/lib/playback";
 import { calcDamage, type DamageResult } from "@/lib/damagecalc";
 import { arenaFor } from "@/lib/arenas";
 
-const NEED_TARGET = new Set(["normal", "any", "adjacentFoe"]);
 type MoveInfo = { name: string; type: string; cat: "Physical" | "Special" | "Status"; bp: number; acc: number; pp: number; pr: number; target: string; desc: string };
+type TargetOpt = { slot: number; species: string; kind: "foe" | "ally" | "self" };
 type FoeInfo = { species: string; types: string[]; fainted: boolean } | null;
 type Gimmick = "mega" | "terastallize" | "dynamax" | "zmove";
 // "maxflare" → "Max Flare", "gmaxwildfire" → "G-Max Wildfire"
@@ -99,6 +99,7 @@ export default function Battle({ id }: { id: string }) {
   const reported = useRef(false);
   const runRef = useRef<() => void>(() => {});
   const prevChoiceLen = useRef(0);
+  const logRef = useRef<HTMLDivElement>(null);
   const [movedex, setMovedex] = useState<Record<string, MoveInfo>>({});
   const [itemNames, setItemNames] = useState<Record<string, string>>({}); // item id → display name
   const [abilityNames, setAbilityNames] = useState<Record<string, string>>({}); // ability id → display name
@@ -276,6 +277,9 @@ export default function Battle({ id }: { id: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Keep the (full) battle log scrolled to the newest line as events stream in.
+  useEffect(() => { const el = logRef.current; if (el) el.scrollTop = el.scrollHeight; }, [snap?.log.length]);
+
   if (fatal) return <Centered>{fatal} <Link href="/" className="text-coral underline">Home</Link></Centered>;
   if (!snap || !battle) return <Centered><span className="hand text-3xl text-coral">entering the battle…</span></Centered>;
 
@@ -286,7 +290,6 @@ export default function Battle({ id }: { id: string }) {
   const isPlayer = viewer === "p1" || viewer === "p2";
   const ended = snap.ended || battle.status === "done";
   const winner = snap.winner ?? battle.winner;
-  const aliveFoes = snap.far.active.filter((s) => s && !s.fainted).length;
   const isDoubles = battle.format !== "singles";
 
   // While the turn is animating, the field shows the current playback step instead
@@ -344,21 +347,34 @@ export default function Battle({ id }: { id: string }) {
   };
   const allChosen = activeSlots.every(slotComplete);
 
+  // The legal targets for a move in doubles, as signed engine slot numbers: foes are
+  // +1/+2, your own mons −1/−2. A move whose target type doesn't single anyone out
+  // (spread, self, whole-side) returns [] — no picker needed.
+  function targetOptionsFor(moveTarget: string, callerSlot: number): TargetOpt[] {
+    const wantsFoe = moveTarget === "normal" || moveTarget === "any" || moveTarget === "adjacentFoe";
+    const wantsAlly = moveTarget === "normal" || moveTarget === "any" || moveTarget === "adjacentAlly" || moveTarget === "adjacentAllyOrSelf";
+    const wantsSelf = moveTarget === "adjacentAllyOrSelf";
+    const opts: TargetOpt[] = [];
+    if (wantsFoe) snap!.far.active.forEach((f, i) => { if (f && !f.fainted) opts.push({ slot: i + 1, species: f.species, kind: "foe" }); });
+    if (wantsAlly) snap!.near.active.forEach((a, i) => { if (i !== callerSlot && a && !a.fainted) opts.push({ slot: -(i + 1), species: a.species, kind: "ally" }); });
+    if (wantsSelf) { const s = snap!.near.active[callerSlot]; if (s && !s.fainted) opts.push({ slot: -(callerSlot + 1), species: s.species, kind: "self" }); }
+    return opts;
+  }
   function chooseMove(slot: number, moveIndex: number, target: string) {
     // In doubles a single-target move must carry an explicit target — otherwise a
-    // trailing gimmick token (mega/terastallize) gets misparsed as the target.
-    const singleTarget = isDoubles && NEED_TARGET.has(target);
-    if (singleTarget && aliveFoes > 1) {
+    // trailing gimmick token (mega/terastallize) gets misparsed as the target. With
+    // more than one legal target (e.g. two foes, or a foe and your ally) we ask.
+    const opts = isDoubles ? targetOptionsFor(target, slot) : [];
+    if (opts.length > 1) {
       setPending((p) => ({ ...p, [slot]: { kind: "move", index: moveIndex, moveTarget: "", needTarget: true } }));
-    } else if (singleTarget) {
-      const idx = snap!.far.active.findIndex((s) => s && !s.fainted); // exactly one foe — auto-target it
-      setPending((p) => ({ ...p, [slot]: { kind: "move", index: moveIndex, moveTarget: String((idx < 0 ? 0 : idx) + 1), needTarget: false } }));
+    } else if (opts.length === 1) {
+      setPending((p) => ({ ...p, [slot]: { kind: "move", index: moveIndex, moveTarget: String(opts[0].slot), needTarget: false } }));
     } else {
       setPending((p) => ({ ...p, [slot]: { kind: "move", index: moveIndex, moveTarget: "", needTarget: false } }));
     }
   }
-  function chooseTarget(slot: number, foeIndex: number) {
-    setPending((p) => { const c = p[slot]; if (c?.kind !== "move") return p; return { ...p, [slot]: { ...c, moveTarget: String(foeIndex + 1) } }; });
+  function chooseTarget(slot: number, targetSlot: number) {
+    setPending((p) => { const c = p[slot]; if (c?.kind !== "move") return p; return { ...p, [slot]: { ...c, moveTarget: String(targetSlot) } }; });
   }
   function chooseSwitch(slot: number, partyIndex: number) {
     setPending((p) => ({ ...p, [slot]: { kind: "switch", index: partyIndex } }));
@@ -431,7 +447,7 @@ export default function Battle({ id }: { id: string }) {
           </div>
         )}
         {/* opponent — HP top-left, sprites upper center-right */}
-        <div className="absolute top-3 left-3 z-10"><HpPlate side={viewFar} align="left" /></div>
+        <div className="absolute top-3 left-3 z-10"><HpPlate side={viewFar} align="left" conds={snap.far.sideConditions} itemNames={itemNames} /></div>
         <div className="absolute top-6 right-6 left-[40%] flex justify-center gap-5 items-end">
           {(viewFar.active.filter(Boolean) as NonNullable<Slot>[]).map((m, i) => (
             <BattleMon key={`far-${i}`} mon={m} facing="front" attacking={attackerSpecies === m.species}
@@ -439,11 +455,11 @@ export default function Battle({ id }: { id: string }) {
           ))}
         </div>
         {/* you — HP bottom-right, sprites lower center-left */}
-        <div className="absolute bottom-3 right-3 z-10"><HpPlate side={viewNear} align="right" /></div>
+        <div className="absolute bottom-3 right-3 z-10"><HpPlate side={viewNear} align="right" conds={snap.near.sideConditions} itemNames={itemNames} /></div>
         <div className="absolute bottom-5 left-6 right-[40%] flex justify-center gap-5 items-end">
           {(viewNear.active.filter(Boolean) as NonNullable<Slot>[]).map((m, i) => (
             <BattleMon key={`near-${i}`} mon={m} facing="back" attacking={attackerSpecies === m.species}
-              tip={<MonTooltip mon={m} info={dex.get(toID(m.species))} revealed={snap.nearRevealed[m.species]} side="ally" />} />
+              tip={<MonTooltip mon={m} info={dex.get(toID(m.species))} revealed={snap.nearRevealed[m.species]} side="ally" itemNames={itemNames} />} />
           ))}
         </div>
         <style jsx>{`
@@ -478,7 +494,8 @@ export default function Battle({ id }: { id: string }) {
                     return s !== i && c?.kind === "switch" && c.index === b.party;
                   }))}
                   foes={snap.far.active} foeInfos={foeInfos} attacker={snap.near.active[i]} field={snap.field} gen={battle.generation ?? 9} megaOnly={megaOnly}
-                  movedex={movedex} onMove={(mi, t) => chooseMove(i, mi, t)} onTarget={(fi) => chooseTarget(i, fi)}
+                  targetsFor={targetOptionsFor}
+                  movedex={movedex} onMove={(mi, t) => chooseMove(i, mi, t)} onTarget={(ts) => chooseTarget(i, ts)}
                   onSwitch={(pi) => chooseSwitch(i, pi)}
                   onGimmick={(g) => setGimmick((p) => { const n = { ...p }; if (g) n[i] = g; else delete n[i]; return n; })}
                 />
@@ -493,11 +510,14 @@ export default function Battle({ id }: { id: string }) {
         )}
       </div>
 
-      {/* Log */}
-      <div className="paper p-4 mt-4 max-h-56 overflow-auto text-sm">
-        {snap.log.slice(-40).map((l, i) => (
-          <div key={i} className={l.startsWith("—") ? "font-semibold text-ink-soft mt-1" : "text-ink"}>{l}</div>
-        ))}
+      {/* Log — the complete battle history, always available (scroll up for earlier turns) */}
+      <div className="paper mt-4">
+        <div className="px-4 pt-3 pb-1 text-[11px] font-bold uppercase tracking-wide text-ink-soft">Battle log</div>
+        <div ref={logRef} className="px-4 pb-4 max-h-72 overflow-auto text-sm">
+          {snap.log.map((l, i) => (
+            <div key={i} className={l.startsWith("—") ? "font-semibold text-ink-soft mt-1" : "text-ink"}>{l}</div>
+          ))}
+        </div>
       </div>
     </main>
   );
@@ -587,12 +607,14 @@ function BattleMon({ mon, facing, attacking, tip }: { mon: NonNullable<Slot>; fa
   );
 }
 
-function MonTooltip({ mon, info, revealed, side, loadout, movedex }: {
+function MonTooltip({ mon, info, revealed, side, loadout, movedex, itemNames }: {
   mon: NonNullable<Slot>; info?: PokeMon; revealed?: string[]; side: "foe" | "ally";
   loadout?: { ability?: string; item?: string; moves?: string[] }; movedex?: Record<string, MoveInfo>;
+  itemNames?: Record<string, string>;
 }) {
   const [spMin, spMax] = info ? speedRange(info.stats.spe, mon.level) : [0, 0];
   const moveName = (id: string) => movedex?.[toID(id)]?.name ?? id.replace(/([a-z])([A-Z0-9])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase());
+  const itemName = (id: string) => itemNames?.[toID(id)] ?? id;
   return (
     <div className="w-52 rounded-lg p-2.5 shadow-xl text-left text-[11px]" style={{ background: "var(--ink)", color: "var(--paper)" }}>
       <div className="flex items-center justify-between mb-1">
@@ -618,6 +640,10 @@ function MonTooltip({ mon, info, revealed, side, loadout, movedex }: {
           <div className="opacity-90">Speed <b>{spMin}–{spMax}</b> <span className="opacity-60">(×1.5 scarf → {Math.floor(spMax * 1.5)})</span></div>
         </>
       ) : <div className="opacity-60">No dex data.</div>}
+      {side === "ally" && mon.item !== undefined && (
+        // Current held item — reflects Trick / Knock Off / Switcheroo swaps live.
+        <div className="mt-1"><span className="opacity-60">Item</span> <b>{mon.item ? itemName(mon.item) : "None"}</b></div>
+      )}
       {loadout && (loadout.ability || loadout.item || (loadout.moves?.length ?? 0) > 0) && (
         // Your own configured set — the full loadout, shown while picking leads.
         <div className="mt-1.5 pt-1.5 border-t border-white/20 space-y-0.5">
@@ -662,9 +688,10 @@ function MonTooltip({ mon, info, revealed, side, loadout, movedex }: {
   );
 }
 
-function HpPlate({ side, align }: { side: { name: string; active: Slot[] }; align: "left" | "right" }) {
+function HpPlate({ side, align, conds, itemNames }: { side: { name: string; active: Slot[] }; align: "left" | "right"; conds?: SideCondition[]; itemNames?: Record<string, string> }) {
   const mons = side.active.filter(Boolean) as NonNullable<Slot>[];
   if (!mons.length) return null;
+  const itemName = (id: string) => itemNames?.[toID(id)] ?? id;
   return (
     <div className={`bg-white/85 rounded-lg px-2.5 py-1.5 shadow ${align === "right" ? "text-right" : ""}`} style={{ minWidth: 156 }}>
       <div className="text-[11px] font-bold text-ink-soft mb-0.5">{side.name}</div>
@@ -681,8 +708,24 @@ function HpPlate({ side, align }: { side: { name: string; active: Slot[] }; alig
           <div className="h-2 rounded bg-black/10 overflow-hidden">
             <div className="h-full rounded" style={{ width: `${m.hpPct}%`, background: hpColor(m.hpPct), transition: "width 0.6s ease" }} />
           </div>
+          {/* Current held item (own side only — reflects Trick/Knock Off swaps) */}
+          {m.item !== undefined && !m.fainted && (
+            <div className={`text-[9px] text-ink-soft ${align === "right" ? "text-right" : ""}`}>
+              {m.item ? `◈ ${itemName(m.item)}` : "◇ no item"}
+            </div>
+          )}
         </div>
       ))}
+      {/* Side conditions in effect (Reflect, Light Screen, Tailwind, hazards, …) */}
+      {conds && conds.length > 0 && (
+        <div className={`flex flex-wrap gap-1 mt-1 ${align === "right" ? "justify-end" : ""}`}>
+          {conds.map((c) => (
+            <span key={c.id} className="text-[9px] font-bold rounded px-1 py-0.5 bg-indigo/85 text-white" style={{ background: "var(--indigo, #5b6bd6)" }}>
+              {c.name}{c.layers && c.layers > 1 ? ` ×${c.layers}` : ""}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -693,15 +736,24 @@ const hpFromCondition = (c: string) => {
   return c?.includes("fnt") ? 0 : max ? Math.round((cur / max) * 100) : 100;
 };
 
-function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, attacker, field, gen, megaOnly, movedex, onMove, onTarget, onSwitch, onGimmick }: {
+function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, attacker, field, gen, megaOnly, movedex, targetsFor, onMove, onTarget, onSwitch, onGimmick }: {
   slot: number; req: Request; benched: { details: string; condition: string; party: number }[]; chosen?: SlotChoice;
   gimmick?: Gimmick; foes: Slot[]; foeInfos: FoeInfo[]; attacker: Slot; field: FieldState; gen: number; megaOnly: boolean; movedex: Record<string, MoveInfo>;
-  onMove: (moveIndex: number, target: string) => void; onTarget: (foeIndex: number) => void;
+  targetsFor: (moveTarget: string, callerSlot: number) => TargetOpt[];
+  onMove: (moveIndex: number, target: string) => void; onTarget: (targetSlot: number) => void;
   onSwitch: (partyIndex: number) => void; onGimmick: (g?: Gimmick) => void;
 }) {
   const active = req.active?.[slot];
   const forceSwitch = req.forceSwitch?.[slot];
   const pickingTarget = chosen?.kind === "move" && chosen.needTarget && !chosen.moveTarget;
+  // The effective target type of the move being aimed (accounting for an armed gimmick).
+  const aimingMove = chosen?.kind === "move" ? active?.moves?.[chosen.index - 1] : undefined;
+  const aimTarget = pickingTarget && aimingMove
+    ? (gimmick === "dynamax" ? active?.maxMoves?.maxMoves?.[chosen!.index - 1]?.target
+      : gimmick === "zmove" ? active?.canZMove?.[chosen!.index - 1]?.target
+      : aimingMove.target) ?? aimingMove.target
+    : "";
+  const targetOpts = pickingTarget ? targetsFor(aimTarget, slot) : [];
   const liveFoes = foeInfos.filter((f): f is NonNullable<FoeInfo> => Boolean(f && !f.fainted && f.types.length));
   // Damage calculator: for each damaging move, the predicted roll vs each live foe.
   // Memoised on the actual battle state so flipping move selections doesn't recompute.
@@ -727,12 +779,16 @@ function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, atta
       {forceSwitch && <div className="text-[11px] font-bold text-coral mb-1.5">A Pokémon fainted — send in a replacement:</div>}
       {pickingTarget && (
         <div className="mb-2">
-          <div className="text-[11px] font-semibold text-ink-soft mb-1">Target which foe?</div>
-          <div className="flex gap-1.5">
-            {foes.map((f, fi) => f && !f.fainted && (
-              <button key={fi} onClick={() => onTarget(fi)}
-                className="text-xs font-semibold rounded px-2 py-1 bg-coral/15 text-coral hover:bg-coral/30 transition">
-                {f.species}
+          <div className="text-[11px] font-semibold text-ink-soft mb-1">Target which Pokémon?</div>
+          <div className="flex flex-wrap gap-1.5">
+            {targetOpts.map((t) => (
+              <button key={t.slot} onClick={() => onTarget(t.slot)}
+                className="text-xs font-semibold rounded px-2 py-1 transition"
+                style={t.kind === "foe"
+                  ? { background: "rgba(217,89,76,0.15)", color: "#b23b30" }
+                  : { background: "rgba(47,143,131,0.18)", color: "#256b61" }}>
+                {t.kind === "foe" ? "▲" : t.kind === "self" ? "＝" : "▽"} {t.species}
+                <span className="opacity-60 ml-1">{t.kind === "foe" ? "foe" : t.kind === "self" ? "self" : "ally"}</span>
               </button>
             ))}
           </div>

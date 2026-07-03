@@ -61,6 +61,9 @@ export const loadRoles = () => loadJSON<Record<string, RoleSet[]>>("/roles.json"
 export const loadMovepools = () => loadJSON<Record<string, string[]>>("/movepools.json", {});
 export const loadSpecies = () => loadJSON<Record<string, string>>("/species.json", {});
 export const loadItems = () => loadJSON<ItemInfo[]>("/items.json", []);
+// Mega id → { base species name, required Mega Stone }. Drafted Megas battle as their
+// BASE form holding the Stone, and Mega Evolve in-match — never pre-evolved.
+export const loadMegas = () => loadJSON<Record<string, { base: string; stone: string }>>("/megas.json", {});
 
 export function emptySet(monId: number, species: string, abilities: string[]): BattleSet {
   return {
