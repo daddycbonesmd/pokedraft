@@ -223,11 +223,14 @@ export async function joinLeague(code: string, name: string): Promise<{ league: 
 
 // ── Room state ─────────────────────────────────────────────────────
 export async function getRoomState(leagueId: string): Promise<RoomState> {
-  const [{ data: league }, { data: coaches }, { data: lots }] = await Promise.all([
+  const [{ data: league, error: leagueErr }, { data: coaches }, { data: lots }] = await Promise.all([
     supabase.from("leagues").select().eq("id", leagueId).single(),
     supabase.from("coaches").select().eq("league_id", leagueId).order("created_at"),
     supabase.from("lots").select().eq("league_id", leagueId).order("created_at"),
   ]);
+  // The league is essential — if the read failed (network/permission), throw so the
+  // caller shows a real error instead of rendering a broken page from undefined data.
+  if (leagueErr || !league) throw new Error("Couldn't reach the server. Check your connection and try again.");
 
   const activeLot = (lots ?? []).find((l: Lot) => l.status === "active") ?? null;
   const wonLots = (lots ?? []).filter((l: Lot) => l.status === "sold");
@@ -425,8 +428,13 @@ export async function submitChoice(battleId: string, side: string, seq: number, 
   if (error && !/duplicate|unique|conflict/i.test(error.message ?? "")) throw error; // ignore double-submit
 }
 
-export async function finishBattle(id: string, winner: string | null): Promise<void> {
-  await supabase.from("battles").update({ status: "done", winner }).eq("id", id).eq("status", "active");
+// Flip a battle to done. Returns true only for the client whose write actually made
+// the transition (the `status = active` guard means exactly one caller wins the race),
+// so that client — and only it — advances the tournament bracket.
+export async function finishBattle(id: string, winner: string | null): Promise<boolean> {
+  const { data } = await supabase.from("battles")
+    .update({ status: "done", winner }).eq("id", id).eq("status", "active").select("id");
+  return Boolean(data && data.length > 0);
 }
 
 // Record a finished battle's winner onto its tournament match and advance the bracket.

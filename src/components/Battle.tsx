@@ -176,12 +176,16 @@ export default function Battle({ id }: { id: string }) {
       // move the player is mid-way through picking every few seconds.
       if (ch.length !== prevChoiceLen.current) { setPending({}); setGimmick({}); prevChoiceLen.current = ch.length; }
 
-      // Any client persists the result once the engine declares a winner.
-      if (s.ended && b.status === "active") await finishBattle(id, s.winner);
+      // Any client persists the result once the engine declares a winner; only the
+      // one whose write actually flipped it (finalized) is the authoritative reporter.
+      const finalized = (s.ended && b.status === "active") ? await finishBattle(id, s.winner) : false;
 
-      // Advance the tournament bracket once this match's battle is settled.
+      // Advance the tournament bracket once this match's battle is settled. The client
+      // that finalized reports it; any other client only reports as a fallback (e.g. it
+      // loaded into an already-done battle whose finalizer left). reportMatchResult
+      // re-reads and no-ops if the match is already settled, so this can't double-advance.
       const w = s.winner ?? b.winner;
-      if (!reported.current && b.match_id && (s.ended || b.status === "done") && w && w !== "tie") {
+      if (!reported.current && b.match_id && (finalized || b.status === "done") && w && w !== "tie") {
         reported.current = true;
         const winnerCoachId = w === b.p1_name ? b.p1_coach_id : b.p2_coach_id;
         if (winnerCoachId) await reportMatchResult(b.league_id, b.match_id, winnerCoachId);
@@ -289,6 +293,22 @@ export default function Battle({ id }: { id: string }) {
 
   // Keep the (full) battle log scrolled to the newest line as events stream in.
   useEffect(() => { const el = logRef.current; if (el) el.scrollTop = el.scrollHeight; }, [snap?.log.length]);
+
+  // Flash the browser-tab title when it's your move, so a player with the tab in the
+  // background knows the battle is waiting on them. Restored when it's not your turn.
+  const myTurnForTitle = Boolean(
+    snap && !snap.ended && battle?.status !== "done" && snap.owes && !snap.request?.teamPreview && (viewer === "p1" || viewer === "p2"),
+  );
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const base = battle ? `${battle.p1_name} vs ${battle.p2_name} — PokéDraft` : "PokéDraft";
+    if (!myTurnForTitle) { document.title = base; return; }
+    let on = false;
+    const flip = () => { on = !on; document.title = on ? "🔴 Your move!" : `▶ ${base}`; };
+    flip();
+    const iv = setInterval(flip, 1000);
+    return () => { clearInterval(iv); document.title = base; };
+  }, [myTurnForTitle, battle?.p1_name, battle?.p2_name]);
 
   // Kill the one-frame flash of THIS turn's end result. When a resolved turn lands
   // while we're showing the live (caught-up) state, the field would paint the new end
@@ -447,8 +467,8 @@ export default function Battle({ id }: { id: string }) {
 
       {/* Field — a random battle arena (deterministic per battle) behind both sides.
           overflow-visible so hover tooltips can spill past the arena edge. */}
-      <div className="relative rounded-xl shadow-inner bg-cover bg-center"
-        style={{ height: 320, backgroundColor: "#9fd0e6", backgroundImage: `url(${arena})` }}>
+      <div className="relative rounded-xl shadow-inner bg-cover bg-center h-[248px] sm:h-[320px]"
+        style={{ backgroundColor: "#9fd0e6", backgroundImage: `url(${arena})` }}>
         {/* a soft vignette so sprites, banners and HP plates stay readable on any arena */}
         <div className="absolute inset-0 rounded-xl pointer-events-none" style={{ background: "radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.18))" }} />
         {/* battle stages — a base under each side so both clearly stand on the arena */}
@@ -471,7 +491,7 @@ export default function Battle({ id }: { id: string }) {
         )}
         {/* opponent — HP top-left, sprites upper center-right */}
         <div className="absolute top-3 left-3 z-10"><HpPlate side={viewFar} align="left" conds={snap.far.sideConditions} itemNames={itemNames} /></div>
-        <div className="absolute top-6 right-6 left-[40%] flex justify-center gap-5 items-end">
+        <div className="absolute top-6 right-2 sm:right-6 left-[37%] sm:left-[40%] flex justify-center gap-2 sm:gap-5 items-end">
           {(viewFar.active.filter(Boolean) as NonNullable<Slot>[]).map((m, i) => (
             <BattleMon key={`far-${i}`} mon={m} facing="front" attacking={attackerSpecies === m.species}
               tip={<MonTooltip mon={m} info={dex.get(toID(m.species))} revealed={snap.farRevealed[m.species]} side="foe" />} />
@@ -479,7 +499,7 @@ export default function Battle({ id }: { id: string }) {
         </div>
         {/* you — HP bottom-right, sprites lower center-left */}
         <div className="absolute bottom-3 right-3 z-10"><HpPlate side={viewNear} align="right" conds={snap.near.sideConditions} itemNames={itemNames} /></div>
-        <div className="absolute bottom-5 left-6 right-[40%] flex justify-center gap-5 items-end">
+        <div className="absolute bottom-5 left-2 sm:left-6 right-[37%] sm:right-[40%] flex justify-center gap-2 sm:gap-5 items-end">
           {(viewNear.active.filter(Boolean) as NonNullable<Slot>[]).map((m, i) => (
             <BattleMon key={`near-${i}`} mon={m} facing="back" attacking={attackerSpecies === m.species}
               tip={<MonTooltip mon={m} info={dex.get(toID(m.species))} revealed={snap.nearRevealed[m.species]} side="ally" itemNames={itemNames} />} />
@@ -583,7 +603,7 @@ function BattleMon({ mon, facing, attacking, tip }: { mon: NonNullable<Slot>; fa
   const vols = volLabels(mon.volatiles);
 
   return (
-    <div className="relative group" style={{ width: 96 }}>
+    <div className="relative group bm-slot">
       {/* Persistent on-sprite notifiers — stat stages + volatile conditions, always shown. */}
       {(boosts.length > 0 || vols.length > 0) && !mon.fainted && (
         <div className="absolute -top-1 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-0.5 pointer-events-none">
@@ -602,13 +622,20 @@ function BattleMon({ mon, facing, attacking, tip }: { mon: NonNullable<Slot>; fa
         </div>
       )}
       <div className={`bm-wrap ${mon.fainted ? "bm-faint" : ""} ${motion}`}
-        style={{ width: 96, height: 104, display: "grid", placeItems: "end center" }}>
+        style={{ display: "grid", placeItems: "end center" }}>
       {/* key by species → a switch or Mega Evolution remounts and replays the entrance */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img key={mon.species} src={url} alt={mon.species} draggable={false} className="bm" />
       <style jsx>{`
+        .bm-slot { width: 96px; }
         .bm { image-rendering: pixelated; max-height: 104px; max-width: 116px; transform-origin: bottom center; animation: bmIn 0.45s ease-out; }
-        .bm-wrap { transform-origin: bottom center; }
+        .bm-wrap { width: 96px; height: 104px; transform-origin: bottom center; }
+        /* Shrink sprites on phones so a doubles field of four fits without overlap. */
+        @media (max-width: 640px) {
+          .bm-slot { width: 68px; }
+          .bm-wrap { width: 68px; height: 78px; }
+          .bm { max-height: 78px; max-width: 84px; }
+        }
         .bm-hit { animation: bmHit 0.45s ease-in-out; }
         .bm-atk-back { animation: bmAtkBack 0.5s ease-out; }
         .bm-atk-front { animation: bmAtkFront 0.5s ease-out; }

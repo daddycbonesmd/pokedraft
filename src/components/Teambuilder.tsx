@@ -48,6 +48,7 @@ export default function Teambuilder({ code }: { code: string }) {
 
   useEffect(() => {
     (async () => {
+     try {
       const identity = getIdentity(code);
       if (!identity) { router.push(`/join?code=${code}`); return; }
       const league = await getLeagueByCode(code);
@@ -106,6 +107,9 @@ export default function Teambuilder({ code }: { code: string }) {
         seeded[m.id] = s;
       }
       setSets(seeded);
+     } catch {
+      setFatal("Couldn't load your team — check your connection and refresh.");
+     }
     })();
   }, [code, router]);
 

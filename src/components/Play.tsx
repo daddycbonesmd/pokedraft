@@ -38,7 +38,7 @@ export default function Play({ code }: { code: string }) {
     setCoaches(state.coaches);
     setBattles(bs);
   }
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [code]);
+  useEffect(() => { load().catch(() => setFatal("Couldn't load battles — check your connection and refresh.")); /* eslint-disable-next-line */ }, [code]);
   // Warm the heavy battle engine bundle in the background so "Start" is instant.
   useEffect(() => { import("@/lib/battle").catch(() => {}); }, []);
   // Keep the battle list live (realtime insert + light poll for status flips), so a

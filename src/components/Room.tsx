@@ -179,6 +179,7 @@ export default function Room({ code }: { code: string }) {
     if (!supabaseReady) return;
     let cleanup = () => {};
     (async () => {
+     try {
       const league = await getLeagueByCode(code);
       if (!league) return setFatal("That league code doesn't exist.");
       if (!identity) return router.push(`/join?code=${code}`);
@@ -199,6 +200,9 @@ export default function Room({ code }: { code: string }) {
       });
       broadcastRef.current = sub.broadcastBid;
       cleanup = sub.unsubscribe;
+     } catch {
+      setFatal("Couldn't reach the server — check your connection and refresh.");
+     }
     })();
     return () => cleanup();
   }, [code, identity, router, refresh]);
