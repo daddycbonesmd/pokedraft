@@ -444,10 +444,23 @@ export default function Battle({ id }: { id: string }) {
   }
   async function submitLeads(order: number[]) {
     if (!req?.side) return;
-    const all = req.side.pokemon.map((_, i) => i + 1);
+    const pokemon = req.side.pokemon;
+    const speciesOf = (n: number) => toID(pokemon[n - 1]?.details.split(",")[0] ?? "");
+    const all = pokemon.map((_, i) => i + 1);
     const full = [...order, ...all.filter((n) => !order.includes(n))];
-    const bring = battle!.format === "singles" ? all.length : 4;
-    await submitChoice(id, viewer as string, 0, "team " + full.slice(0, bring).join(""));
+    // Species Clause: never field two of the same species. This mainly guards the case
+    // where a coach drafted both a base Pokémon AND its Mega — both battle as the base
+    // species, so without this a team could bring two identical mons. Keep the
+    // earlier-ordered one (the lead the player tapped) and drop the rest.
+    const seen = new Set<string>();
+    const deduped = full.filter((n) => {
+      const s = speciesOf(n);
+      if (s && seen.has(s)) return false;
+      if (s) seen.add(s);
+      return true;
+    });
+    const bring = battle!.format === "singles" ? deduped.length : Math.min(4, deduped.length);
+    await submitChoice(id, viewer as string, 0, "team " + deduped.slice(0, bring).join(""));
     scheduleSync();
   }
   async function forfeit() {
@@ -998,9 +1011,9 @@ function SlotChooser({ slot, req, benched, chosen, gimmick, foes, foeInfos, atta
 
 // A single Pokémon thumbnail with a hover dossier — used to scout both teams on
 // the Team Preview screen.
-function PreviewMon({ species, level, dex, facing, badge, outline, onClick, loadout, movedex }: {
+function PreviewMon({ species, level, dex, facing, badge, outline, locked, onClick, loadout, movedex }: {
   species: string; level: number; dex: Map<string, PokeMon>; facing: "front" | "back";
-  badge?: number; outline?: boolean; onClick?: () => void;
+  badge?: number; outline?: boolean; locked?: boolean; onClick?: () => void;
   loadout?: { ability?: string; item?: string; moves?: string[] }; movedex?: Record<string, MoveInfo>;
 }) {
   const url = (Sprites.getPokemon(species, { gen: "ani", side: facing === "front" ? "p2" : "p1" }) as { url: string }).url;
@@ -1008,6 +1021,7 @@ function PreviewMon({ species, level, dex, facing, badge, outline, onClick, load
   const inner = (
     <>
       {badge != null && <span className="absolute top-0 left-0 z-10 bg-coral text-white text-[10px] font-bold w-4 h-4 grid place-items-center rounded-br">{badge}</span>}
+      {locked && <span className="absolute top-0 right-0 z-10 text-[11px]" title="Same species already chosen">⛔</span>}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={url} alt={species} className="h-12" style={{ imageRendering: "pixelated" }} />
       <div className="text-[10px] truncate w-full text-center">{species}</div>
@@ -1017,8 +1031,8 @@ function PreviewMon({ species, level, dex, facing, badge, outline, onClick, load
     </>
   );
   return onClick ? (
-    <button onClick={onClick} className="paper p-1.5 relative group grid place-items-center"
-      style={{ outline: outline ? "2.5px solid var(--coral)" : "none" }}>{inner}</button>
+    <button onClick={onClick} className="paper p-1.5 relative group grid place-items-center transition"
+      style={{ outline: outline ? "2.5px solid var(--coral)" : "none", opacity: locked ? 0.4 : 1 }}>{inner}</button>
   ) : (
     <div className="paper p-1.5 relative group grid place-items-center">{inner}</div>
   );
@@ -1032,8 +1046,18 @@ function TeamPreview({ req, format, onConfirm, farTeam, farName, dex, movedex, i
   const [order, setOrder] = useState<number[]>([]);
   const mons = req.side?.pokemon ?? [];
   const doubles = format !== "singles";
-  const bring = doubles ? Math.min(4, mons.length) : mons.length;
-  const toggle = (n: number) => setOrder((o) => (o.includes(n) ? o.filter((x) => x !== n) : doubles && o.length >= bring ? o : [...o, n]));
+  const speciesOf = (n: number) => toID(mons[n - 1]?.details.split(",")[0] ?? "");
+  // Distinct species you can actually field — a drafted base + its Mega both battle as
+  // the base species, so they collapse to one here (Species Clause).
+  const distinctSpecies = new Set(mons.map((_, i) => speciesOf(i + 1)));
+  const bring = doubles ? Math.min(4, distinctSpecies.size) : mons.length;
+  const dupSpecies = mons.map((p) => p.details.split(",")[0]).filter((s, i, a) => a.indexOf(s) !== i);
+  const toggle = (n: number) => setOrder((o) => {
+    if (o.includes(n)) return o.filter((x) => x !== n);          // deselect
+    if (doubles && o.length >= bring) return o;                  // already picked enough
+    if (o.some((x) => speciesOf(x) === speciesOf(n))) return o;  // Species Clause: that species is already in
+    return [...o, n];
+  });
   return (
     <div>
       {/* Opponent's team — scout it before deciding your leads (hover for details). */}
@@ -1048,6 +1072,11 @@ function TeamPreview({ req, format, onConfirm, farTeam, farName, dex, movedex, i
       <p className="text-sm font-semibold mb-2 text-center">
         {doubles ? `Pick the ${bring} you'll bring — tap in order (first 2 lead)` : "Tap your lead, then the rest in order (optional)"}
       </p>
+      {dupSpecies.length > 0 && (
+        <p className="text-[11px] text-coral text-center mb-2 font-semibold">
+          ⛔ You have two {dupSpecies.join(", ")} (a base + its Mega) — only one of each can battle.
+        </p>
+      )}
       <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
         {mons.map((p, i) => {
           const n = i + 1, pos = order.indexOf(n);
@@ -1059,10 +1088,12 @@ function TeamPreview({ req, format, onConfirm, farTeam, farName, dex, movedex, i
             item: p.item ? (itemNames[toID(p.item)] ?? p.item) : "",
             moves: p.moves,
           };
+          // Locked = not chosen, but another already-chosen mon is the same species.
+          const locked = pos < 0 && order.some((x) => speciesOf(x) === speciesOf(n));
           return (
             <PreviewMon key={n} species={species} level={level} dex={dex} facing="back"
-              badge={pos >= 0 ? pos + 1 : undefined} outline={pos >= 0} onClick={() => toggle(n)}
-              loadout={loadout} movedex={movedex} />
+              badge={pos >= 0 ? pos + 1 : undefined} outline={pos >= 0} locked={locked}
+              onClick={() => toggle(n)} loadout={loadout} movedex={movedex} />
           );
         })}
       </div>
