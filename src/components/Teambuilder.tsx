@@ -12,6 +12,7 @@ import {
   emptySet, setFromRole, setReady, evTotal, teamToShowdown, uniqueItem,
   type BattleSet, type RoleSet, type Stat, type ItemInfo,
 } from "@/lib/teambuilder";
+import { maybeReloadForVersionError } from "@/lib/reload-guard";
 
 // A drafted Pokémon shown in the builder. Megas are shown as their BASE form (name,
 // typing, stats, abilities) but keep the drafted Mega id — `megaInto`/`megaStone`
@@ -252,6 +253,7 @@ export default function Teambuilder({ code }: { code: string }) {
       setImportMsg(`Applied ${applied} set${applied === 1 ? "" : "s"}${skipped.length ? ` · skipped ${skipped.length} not on your team (${skipped.slice(0, 3).join(", ")}${skipped.length > 3 ? "…" : ""})` : ""}.`);
       if (applied > 0) { setImportText(""); setTimeout(() => setImportOpen(false), 1500); }
     } catch (e) {
+      if (maybeReloadForVersionError(e)) return; // stale build → the sim import() 404'd; reload
       setImportMsg("Import failed: " + (e instanceof Error ? e.message : "unrecognised format"));
     }
   }
@@ -336,7 +338,7 @@ export default function Teambuilder({ code }: { code: string }) {
       )}
 
       <div className="space-y-4">
-        {mons.map((m) => (
+        {mons.map((m) => sets[m.id] ? (
           <SetEditor
             key={m.id} mon={m} set={sets[m.id]}
             roles={roles[m.id] ?? []} movepool={movepools[m.id] ?? []} items={itemOptions} movedex={movedex}
@@ -348,7 +350,7 @@ export default function Teambuilder({ code }: { code: string }) {
             onEv={(stat, v) => setEv(m.id, stat, v)}
             onIv={(stat, v) => setIv(m.id, stat, v)}
           />
-        ))}
+        ) : null)}
       </div>
     </main>
   );

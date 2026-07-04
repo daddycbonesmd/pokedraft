@@ -9,6 +9,7 @@ import {
 } from "@/lib/db";
 import { teamToShowdown, setReady } from "@/lib/teambuilder";
 import { supabaseReady } from "@/lib/supabase";
+import { maybeReloadForVersionError } from "@/lib/reload-guard";
 
 const rand = () => Math.floor(Math.random() * 65536);
 
@@ -78,6 +79,7 @@ export default function Play({ code }: { code: string }) {
       });
       router.push(`/battle/${battle.id}`);
     } catch (e) {
+      if (maybeReloadForVersionError(e)) return; // stale build → import() 404'd; reload to the new one
       setError(e instanceof Error ? e.message : "Could not start the battle.");
       setBusy(false); busyRef.current = false;
     }
@@ -104,6 +106,7 @@ export default function Play({ code }: { code: string }) {
       });
       router.push(`/battle/${battle.id}`);
     } catch (e) {
+      if (maybeReloadForVersionError(e)) return; // stale build → import() 404'd; reload to the new one
       setError(e instanceof Error ? e.message : "Could not start practice.");
       setBusy(false); busyRef.current = false;
     }
