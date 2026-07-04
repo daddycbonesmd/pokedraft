@@ -90,8 +90,32 @@ export type RoomState = {
 type Identity = { coachId: string; adminToken?: string };
 const idKey = (code: string) => `pokedraft.room.${code.toUpperCase()}`;
 
+// Shown when the browser blocks localStorage — most often an in-app/chat webview
+// (Discord, Messenger, Instagram, iMessage preview) or Safari with "Block All
+// Cookies" on. Without storage we can't remember who a player is, so joining fails.
+export const STORAGE_BLOCKED_MSG =
+  "Your browser is blocking site storage, so we can't keep you signed in. Open this link in Safari or Chrome directly (not inside a chat app), and make sure cookies aren't fully blocked (iPhone: Settings → Safari → Block All Cookies OFF). Then try again.";
+
+// Is localStorage actually usable? Safari's "Block All Cookies" and many in-app
+// webviews throw "SecurityError: The operation is insecure." on any access.
+export function storageAvailable(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const k = "__pd_probe__";
+    window.localStorage.setItem(k, "1");
+    window.localStorage.removeItem(k);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function saveIdentity(code: string, id: Identity) {
-  localStorage.setItem(idKey(code), JSON.stringify(id));
+  try {
+    localStorage.setItem(idKey(code), JSON.stringify(id));
+  } catch {
+    throw new Error(STORAGE_BLOCKED_MSG);
+  }
 }
 export function getIdentity(code: string): Identity | null {
   if (typeof window === "undefined") return null;
@@ -105,15 +129,19 @@ export function getIdentity(code: string): Identity | null {
 const ID_PREFIX = "pokedraft.room.";
 export function myLeagueCodes(): string[] {
   if (typeof window === "undefined") return [];
-  const out: string[] = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i);
-    if (k && k.startsWith(ID_PREFIX)) out.push(k.slice(ID_PREFIX.length));
+  try {
+    const out: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(ID_PREFIX)) out.push(k.slice(ID_PREFIX.length));
+    }
+    return out;
+  } catch {
+    return [];
   }
-  return out;
 }
 export function forgetLeague(code: string) {
-  localStorage.removeItem(idKey(code));
+  try { localStorage.removeItem(idKey(code)); } catch { /* storage blocked — nothing to forget */ }
 }
 
 function makeCode() {
@@ -143,6 +171,7 @@ export async function createLeague(opts: {
   legalItems?: string[] | null;
   generation?: number;
 }): Promise<{ league: League; coach: Coach }> {
+  if (!storageAvailable()) throw new Error(STORAGE_BLOCKED_MSG); // don't create a league we can't own
   const code = makeCode();
   const admin_token = crypto.randomUUID();
   const base = {
@@ -201,6 +230,9 @@ export async function getLeaguesByCodes(codes: string[]): Promise<League[]> {
 }
 
 export async function joinLeague(code: string, name: string): Promise<{ league: League; coach: Coach }> {
+  // Bail before creating a coach we couldn't remember — otherwise a blocked-storage
+  // browser leaves an orphaned coach in the room and still can't get in.
+  if (!storageAvailable()) throw new Error(STORAGE_BLOCKED_MSG);
   const league = await getLeagueByCode(code);
   if (!league) throw new Error("No league found with that code.");
 

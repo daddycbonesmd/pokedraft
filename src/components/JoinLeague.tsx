@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { joinLeague, getIdentity } from "@/lib/db";
+import { joinLeague, getIdentity, storageAvailable, STORAGE_BLOCKED_MSG } from "@/lib/db";
 import { supabaseReady } from "@/lib/supabase";
 import { EnvNotice } from "./HostLeague";
 
@@ -13,6 +13,9 @@ export default function JoinLeague({ initialCode = "" }: { initialCode?: string 
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [storageBlocked, setStorageBlocked] = useState(false);
+  // Checked after mount (client-only) to avoid a hydration mismatch.
+  useEffect(() => { setStorageBlocked(!storageAvailable()); }, []);
 
   async function join() {
     setError("");
@@ -39,6 +42,12 @@ export default function JoinLeague({ initialCode = "" }: { initialCode?: string 
       <h1 className="font-display text-4xl font-black mt-1 mb-6">
         Join a <span className="text-coral">draft</span>
       </h1>
+      {storageBlocked && (
+        <div className="paper p-4 mb-4 text-sm" style={{ borderLeft: "4px solid var(--coral)" }}>
+          <b className="text-coral">⚠ This browser is blocking site storage.</b>
+          <p className="text-ink-soft mt-1">{STORAGE_BLOCKED_MSG}</p>
+        </div>
+      )}
       <div className="paper p-6 space-y-4">
         <label className="block">
           <span className="text-sm font-semibold text-ink-soft">League code</span>
